@@ -1,0 +1,245 @@
+package server
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/nishannorunobi/updown/web"
+)
+
+const (
+	tok     = "test-token"
+	hostKey = "host-key"
+)
+
+func newTest(t *testing.T) (*Server, string, string) {
+	t.Helper()
+	recv, share := t.TempDir(), t.TempDir()
+	s := New(Options{Product: "updown", Version: "0.1.0", ReceiveDir: recv, ShareDir: share,
+		StopMode: "enter", MaxBytes: 1 << 20, Token: tok, Page: web.Index,
+		HostKey: hostKey, HostPage: web.Host,
+		SendLink: "http://172.20.10.6:8070/send?t=" + tok, ReceiveLink: "http://172.20.10.6:8070/receive?t=" + tok,
+		SendQR: "<svg>send</svg>", ReceiveQR: "<svg>receive</svg>"})
+	return s, recv, share
+}
+
+// do sends one request from client address ip ("" = the phone).
+func do(s *Server, method, path, ip string, body []byte) *httptest.ResponseRecorder {
+	var r io.Reader
+	if body != nil {
+		r = bytes.NewReader(body)
+	}
+	req := httptest.NewRequest(method, path, r)
+	if ip == "" {
+		ip = "172.20.10.2"
+	}
+	req.RemoteAddr = ip + ":50000"
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	return w
+}
+
+func q(path string) string { return path + "?t=" + tok }
+
+func TestTokenRequired(t *testing.T) {
+	s, _, _ := newTest(t)
+	for _, p := range []string{"/send", "/receive", "/api/info", "/send?t=wrong", "/api/files?t="} {
+		if w := do(s, "GET", p, "", nil); w.Code != http.StatusForbidden || w.Body.Len() != 0 {
+			t.Errorf("%s: got %d %q, want 403 with empty body", p, w.Code, w.Body.String())
+		}
+	}
+	for _, p := range []string{"/send", "/receive"} {
+		if w := do(s, "GET", q(p), "", nil); w.Code != http.StatusOK {
+			t.Fatalf("%s with the token: got %d", p, w.Code)
+		}
+	}
+	// Only the two screens exist: "/" is not a page.
+	if w := do(s, "GET", q("/"), "", nil); w.Code != http.StatusNotFound {
+		t.Fatalf("/: got %d, want 404", w.Code)
+	}
+}
+
+func TestOnePhonePerSession(t *testing.T) {
+	s, _, _ := newTest(t)
+	if w := do(s, "GET", q("/api/info"), "172.20.10.2", nil); w.Code != http.StatusOK {
+		t.Fatalf("first phone: %d", w.Code)
+	}
+	if w := do(s, "GET", q("/api/info"), "172.20.10.3", nil); w.Code != http.StatusForbidden {
+		t.Fatalf("second phone: got %d, want 403", w.Code)
+	}
+}
+
+func TestPageIsSelfContained(t *testing.T) {
+	s, _, _ := newTest(t)
+	w := do(s, "GET", q("/send"), "", nil)
+	if w.Header().Get("Content-Security-Policy") == "" || w.Header().Get("Cache-Control") != "no-store" {
+		t.Error("missing CSP / no-store headers")
+	}
+	if m := regexp.MustCompile(`https?://`).FindString(w.Body.String()); m != "" {
+		t.Errorf("page references an external URL (%s)", m)
+	}
+}
+
+func TestUploadChecksumAndNoPartFile(t *testing.T) {
+	s, recv, _ := newTest(t)
+	data := bytes.Repeat([]byte("updown "), 50000) // ~350 KB
+	w := do(s, "PUT", q("/api/upload/"+url.PathEscape("holiday video.mov")), "", data)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("got %d %s", w.Code, w.Body.String())
+	}
+	var r struct {
+		Name   string `json:"name"`
+		Size   int64  `json:"size"`
+		SHA256 string `json:"sha256"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &r)
+	sum := sha256.Sum256(data)
+	if r.Name != "holiday video.mov" || r.Size != int64(len(data)) || r.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("response %+v", r)
+	}
+	disk, _ := os.ReadFile(filepath.Join(recv, r.Name))
+	if !bytes.Equal(disk, data) {
+		t.Fatal("file on disk differs")
+	}
+	ents, _ := os.ReadDir(recv)
+	if len(ents) != 1 {
+		t.Fatalf("receive folder has %d entries (a part file left?)", len(ents))
+	}
+}
+
+func TestUploadNeverOverwrites(t *testing.T) {
+	s, recv, _ := newTest(t)
+	for i, want := range []string{"a.txt", "a (1).txt", "a (2).txt"} {
+		w := do(s, "PUT", q("/api/upload/a.txt"), "", []byte{byte('0' + i)})
+		if !strings.Contains(w.Body.String(), `"name":"`+want+`"`) {
+			t.Fatalf("upload %d: got %s, want name %s", i, w.Body.String(), want)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(recv, "a.txt")); string(b) != "0" {
+		t.Fatal("the first file was overwritten")
+	}
+}
+
+func TestUploadTooLarge(t *testing.T) {
+	s, recv, _ := newTest(t)
+	w := do(s, "PUT", q("/api/upload/big.bin"), "", make([]byte, 2<<20))
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("got %d, want 413", w.Code)
+	}
+	if ents, _ := os.ReadDir(recv); len(ents) != 0 {
+		t.Fatal("something was written for a refused upload")
+	}
+}
+
+func TestSafeName(t *testing.T) {
+	for in, want := range map[string]string{
+		"photo.jpg":        "photo.jpg",
+		"../../etc/passwd": "passwd",
+		`C:\Users\x\a.txt`: "a.txt",
+		".hidden":          "_hidden",
+		"..":               "__",
+		"a:b*c?.txt":       "a_b_c_.txt",
+		"":                 "upload",
+		"tab\there.txt":    "tab_here.txt",
+	} {
+		if got := SafeName(in); got != want {
+			t.Errorf("SafeName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestDownloadAndRange(t *testing.T) {
+	s, _, share := newTest(t)
+	data := []byte("0123456789abcdef")
+	os.WriteFile(filepath.Join(share, "notes.txt"), data, 0o644)
+	os.WriteFile(filepath.Join(share, "x"+partSuffix), []byte("hidden"), 0o644)
+
+	w := do(s, "GET", q("/api/files"), "", nil)
+	if !strings.Contains(w.Body.String(), `"name":"notes.txt"`) || strings.Contains(w.Body.String(), partSuffix) {
+		t.Fatalf("list: %s", w.Body.String())
+	}
+	w = do(s, "GET", q("/api/files/notes.txt"), "", nil)
+	if w.Code != http.StatusOK || !bytes.Equal(w.Body.Bytes(), data) || !strings.HasPrefix(w.Header().Get("Content-Disposition"), "attachment") {
+		t.Fatalf("download: %d %q", w.Code, w.Body.String())
+	}
+	req := httptest.NewRequest("GET", q("/api/files/notes.txt"), nil)
+	req.RemoteAddr = "172.20.10.2:50000"
+	req.Header.Set("Range", "bytes=4-7")
+	rw := httptest.NewRecorder()
+	s.ServeHTTP(rw, req)
+	if rw.Code != http.StatusPartialContent || rw.Body.String() != "4567" {
+		t.Fatalf("range: %d %q", rw.Code, rw.Body.String())
+	}
+	if w := do(s, "GET", q("/api/files/missing.txt"), "", nil); w.Code != http.StatusNotFound {
+		t.Fatalf("missing file: %d", w.Code)
+	}
+}
+
+func TestOnlyOfferedFilesVisible(t *testing.T) {
+	s, recv, _ := newTest(t)
+	os.WriteFile(filepath.Join(recv, "private.txt"), []byte("x"), 0o644)
+	if w := do(s, "GET", q("/api/files/private.txt"), "", nil); w.Code != http.StatusNotFound {
+		t.Fatalf("a received (not offered) file was downloadable: %d", w.Code)
+	}
+}
+
+func TestHostPage(t *testing.T) {
+	s, _, _ := newTest(t)
+	for _, p := range []string{"/host", "/host?k=wrong", "/host?t=" + tok, "/host/api/status", "/host/qr/send.svg?t=" + tok} {
+		if w := do(s, "GET", p, "127.0.0.1", nil); w.Code != http.StatusForbidden {
+			t.Errorf("%s: got %d, want 403 (the phone token must not open the host page)", p, w.Code)
+		}
+	}
+	w := do(s, "GET", "/host?k="+hostKey, "172.28.0.1", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "qr/send.svg") || !strings.Contains(w.Body.String(), "qr/receive.svg") {
+		t.Fatalf("host page: %d", w.Code)
+	}
+	if m := regexp.MustCompile(`https?://`).FindString(w.Body.String()); m != "" {
+		t.Errorf("host page references an external URL (%s)", m)
+	}
+	for name, want := range map[string]string{"send": "<svg>send</svg>", "receive": "<svg>receive</svg>"} {
+		w := do(s, "GET", "/host/qr/"+name+".svg?k="+hostKey, "172.28.0.1", nil)
+		if w.Header().Get("Content-Type") != "image/svg+xml" || w.Body.String() != want {
+			t.Errorf("qr/%s.svg: %q", name, w.Body.String())
+		}
+	}
+	// The host page never takes the phone's session.
+	if w := do(s, "GET", q("/api/info"), "172.20.10.2", nil); w.Code != http.StatusOK {
+		t.Fatalf("phone after host page: %d", w.Code)
+	}
+	s.Log("hello")
+	w = do(s, "GET", "/host/api/status?k="+hostKey+"&after=0", "172.28.0.1", nil)
+	body := w.Body.String()
+	if !strings.Contains(body, `"phone":"172.20.10.2"`) || !strings.Contains(body, "hello") || !strings.Contains(body, `"send":"http://172.20.10.6:8070/send?t=`) || !strings.Contains(body, `"receive":"http://172.20.10.6:8070/receive?t=`) {
+		t.Fatalf("status: %s", body)
+	}
+}
+
+func TestReceiveListNewestFirstNoHidden(t *testing.T) {
+	s, _, share := newTest(t)
+	for i, n := range []string{"old.pdf", "new.jpg", ".hidden"} {
+		p := filepath.Join(share, n)
+		os.WriteFile(p, []byte(n), 0o644)
+		mt := time.Now().Add(time.Duration(i-5) * time.Hour)
+		os.Chtimes(p, mt, mt)
+	}
+	body := do(s, "GET", q("/api/files"), "", nil).Body.String()
+	if strings.Contains(body, ".hidden") {
+		t.Error("hidden file listed")
+	}
+	if i, j := strings.Index(body, "new.jpg"), strings.Index(body, "old.pdf"); i < 0 || j < 0 || i > j {
+		t.Errorf("not newest first: %s", body)
+	}
+}

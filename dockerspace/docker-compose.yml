@@ -1,0 +1,40 @@
+# docker-compose.yml — updown's dev/build/test container. Nothing is installed on the host:
+# Go, builds and test runs all happen in here. Variables come from dockerspace/.env
+# (GO_IMAGE) and host_scripts/start.sh (HOST_UID / HOST_GID).
+name: updown
+
+services:
+  updown-dev:
+    build:
+      context: ..                          # project root
+      dockerfile: dockerspace/Dockerfile
+      args:
+        GO_IMAGE: ${GO_IMAGE:-golang:1.25-bookworm}
+        CONTAINER_WORKDIR: /updown
+    image: updown-dev-image:1.0
+    container_name: updown-dev-container
+    hostname: updown-dev-container
+    # Run as the host user: files the build writes into the bind-mounted project stay
+    # owned by the owner, not root.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    networks:
+      my_docker_network:
+        ipv4_address: 172.28.0.70          # static IP within my_docker_network's subnet
+    ports:
+      # The updown server under test listens here; the phone reaches the host's
+      # hotspot / Wi-Fi address on these ports (8000+ is left to backup/run_qr.sh).
+      - "8070-8079:8070-8079"
+    volumes:
+      - ..:/updown                                                      # the project (source + release/)
+      - ../../../mountspace/logs:/mountspace/logs                       # mirror logs
+      - ../../../mountspace/data/myworkspace/projectspace/updown/gocache:/gocache   # Go build + module cache
+      - ${HOST_DOWNLOADS:-${HOME}/Downloads}:/downloads                  # this PC's Downloads: uploads land here, the Receive screen lists it
+    environment:
+      LOG_MIRROR_ROOT: /mountspace/logs/myworkspace/projectspace/updown
+      CONTAINER_WORKDIR: /updown
+      TZ: ${TZ:-America/New_York}
+    restart: "no"
+
+networks:
+  my_docker_network:
+    external: true

@@ -1,0 +1,104 @@
+<!doctype html>
+<!-- The PC's host page (docs/contract.md §4): opened in THIS PC's browser from the link the
+     console prints. Shows TWO QR codes — "Send files" (the phone's upload screen) and
+     "Receive files" (the phone's download screen: this PC's Downloads) — who is connected,
+     and the live event log. One file, no external URL; its key (?k=…) is never shown to
+     the phone. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>updown</title>
+<style>
+  :root { color-scheme: light dark; --fg:#1b1b1f; --bg:#f6f6f8; --card:#ffffff; --muted:#6b6b76;
+          --line:#e2e2e8; --ok:#1f8a4c; --bad:#c6362f; --accent:#2f6fe4; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#ececf1; --bg:#16161a; --card:#202026; --muted:#a0a0ab; --line:#33333b;
+            --ok:#4cc27f; --bad:#ff6b63; --accent:#6b9cff; } }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px 16px; font:15px/1.45 system-ui, -apple-system, sans-serif; color:var(--fg); background:var(--bg); }
+  main { max-width:1000px; margin:0 auto; display:grid; gap:16px; grid-template-columns: minmax(0, 1fr); }
+  .codes { display:grid; gap:16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 640px) { .codes { grid-template-columns: minmax(0, 1fr); } }
+  .code h2 { font-size:1.15rem; margin:0; }
+  .code p { margin:4px 0 0; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; min-width:0; }
+  h1 { font-size:1.2rem; margin:0 0 4px; }
+  h2 { font-size:1rem; margin:0 0 10px; }
+  .muted { color:var(--muted); font-size:.9rem; }
+  .qr { background:#fff; border-radius:10px; padding:8px; margin:14px 0; }
+  .qr img { display:block; width:100%; height:auto; image-rendering:pixelated; }
+  .status { margin-top:10px; font-weight:600; }
+  .status.ok { color:var(--ok); }
+  #log { font:12.5px/1.5 ui-monospace, monospace; max-height:70vh; overflow:auto; margin:0; padding:0; list-style:none; }
+  #log li { padding:3px 0; border-top:1px solid var(--line); overflow-wrap:anywhere; }
+  #log li:first-child { border-top:0; }
+  #log time { color:var(--muted); margin-right:8px; }
+  #log .bad { color:var(--bad); }
+  #log .ok { color:var(--ok); }
+</style>
+</head>
+<body>
+<main>
+  <section>
+    <h1 id="title">updown</h1>
+    <div class="muted" id="version"></div>
+    <div class="status" id="status">Waiting for the phone… scan a code with the phone camera, then tap the link.</div>
+  </section>
+  <div class="codes">
+    <section class="code">
+      <h2>Send files</h2>
+      <p class="muted">Phone → this PC: opens the upload screen on the phone.</p>
+      <div class="qr"><img id="qr-send" alt="QR code: send files to this PC"></div>
+    </section>
+    <section class="code">
+      <h2>Receive files</h2>
+      <p class="muted">This PC → phone: opens this PC's Downloads on the phone to pick files.</p>
+      <div class="qr"><img id="qr-receive" alt="QR code: receive files from this PC"></div>
+    </section>
+  </div>
+  <section>
+    <h2>Log</h2>
+    <ul id="log"></ul>
+  </section>
+</main>
+<script>
+"use strict";
+const k = "?k=" + encodeURIComponent(new URLSearchParams(location.search).get("k") || "");
+const $ = (id) => document.getElementById(id);
+$("qr-send").src = "/host/qr/send.svg" + k;
+$("qr-receive").src = "/host/qr/receive.svg" + k;
+let after = 0, stopped = false;
+
+function add(l) {
+  const li = document.createElement("li");
+  const t = document.createElement("time");
+  t.textContent = new Date(l.time).toLocaleTimeString();
+  const s = document.createElement("span");
+  s.textContent = l.line;
+  if (/refused|failed/.test(l.line)) s.className = "bad";
+  else if (/finished|connected/.test(l.line)) s.className = "ok";
+  li.append(t, s);
+  $("log").append(li);
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/host/api/status" + k + "&after=" + after, { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    const s = await r.json();
+    $("title").textContent = s.product;
+    $("version").textContent = "v" + s.version + " · stops: " + s.stop_mode;
+    if (s.phone) { $("status").textContent = "Phone connected: " + s.phone; $("status").className = "status ok"; }
+    for (const l of s.log) { add(l); after = l.n; }
+  } catch (_) {
+    if (!stopped) { stopped = true; $("status").textContent = "Server stopped."; $("status").className = "status"; }
+    return;
+  }
+  setTimeout(poll, 1000);
+}
+poll();
+</script>
+</body>
+</html>
