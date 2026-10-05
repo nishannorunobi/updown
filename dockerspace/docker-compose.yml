@@ -3,8 +3,14 @@
 # (GO_IMAGE) and host_scripts/start.sh (HOST_UID / HOST_GID).
 name: updown
 
+# ── Container logs capped (CLAUDEWORK-4): json-file logs otherwise grow without bound in /var/lib/docker ──
+x-logging: &logs
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
 services:
   updown-dev:
+    logging: *logs
     build:
       context: ..                          # project root
       dockerfile: dockerspace/Dockerfile
