@@ -5,5 +5,6 @@
 .venv/
 __pycache__/
 node_modules/
-/release/            # build output only (anchored: internal/release is SOURCE and must be tracked)
+# build output only (anchored: internal/release is SOURCE and must be tracked)
+/release/
 *.zip
