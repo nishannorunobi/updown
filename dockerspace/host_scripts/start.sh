@@ -1,11 +1,13 @@
 #!/bin/bash
-# start.sh — start updown's dev container (docker compose) from its EXISTING image.
+# start.sh — start updown's container (docker compose) from its EXISTING image. Inside, updown-agent (the
+# entry point, [2.1] UPDOWN-26) builds and runs updown; this script only starts the container and shows
+# the link the agent hands out — open it in this PC's browser for the QR codes.
 #
 #     bash dockerspace/host_scripts/start.sh            # daily path: no rebuild
 #     bash dockerspace/host_scripts/start.sh --build    # rebuild the image first (Dockerfile / GO_IMAGE changed)
 #
-# Idempotent: already running → says so, exit 0. Waits until the container runs and Go
-# answers inside it, so "OK" means usable. Exit 1 = it did not come up.
+# Idempotent: docker compose up (a changed setting recreates the container; otherwise nothing changes).
+# Exit 1 = the container did not come up.
 set -uo pipefail
 
 # ── Mirror logging ─────────────────────────────────────────────────────────────
@@ -19,14 +21,6 @@ fi
 DOCKERSPACE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$(dirname "$DOCKERSPACE")"
 C=updown-dev-container
-
-if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$C"; then
-    echo -e "\033[32m[  OK  ]\033[0m $C already running"; exit 0
-fi
-
-# Standalone: the shared network the compose joins — created here if missing.
-docker network inspect my_docker_network >/dev/null 2>&1 \
-    || docker network create --subnet=172.28.0.0/16 my_docker_network >/dev/null
 
 # Bind-mount sources must exist and belong to the host user BEFORE compose runs,
 # otherwise Docker creates them root-owned and the container (running as this user)
@@ -47,12 +41,16 @@ else
     docker compose up -d || exit 1
 fi
 
-for _ in $(seq 1 20); do
-    if docker exec "$C" go version >/dev/null 2>&1; then
-        echo -e "\033[32m[  OK  ]\033[0m $C running — $(docker exec "$C" go version)"
-        exit 0
-    fi
-    sleep 1
-done
+# the link — asked from updown-agent inside (it builds updown first: up to ~1 minute on a cold Go cache)
+if link="$(docker exec "$C" python3 /updown/updown-agent/agent.py link 90 2>/dev/null)"; then
+    echo -e "\033[32m[  OK  ]\033[0m $C running — updown is ready"
+    echo "         open this link in this PC's browser for the QR codes (send / receive files):"
+    echo -e "         \033[1m$link\033[0m"
+    echo "         a new link comes after 15 idle minutes — the current one: bash status.sh"
+    exit 0
+fi
+if docker ps --format '{{.Names}}' | grep -qx "$C"; then
+    echo -e "\033[33m[WARN]\033[0m   $C running, but updown gave no link yet — see: docker logs $C"; exit 0
+fi
 echo -e "\033[31m[ERROR]\033[0m  $C did not come up (docker logs $C)"
 exit 1

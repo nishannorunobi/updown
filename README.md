@@ -1,5 +1,11 @@
 # updown
 
+```
+bash start.sh      # starts updown and prints the link — open it in this PC's browser, scan a QR code with the phone
+bash status.sh     # running? + the current link
+bash stop.sh
+```
+
 Offline file transfer between a PC and a phone: the PC runs a small server, the phone
 scans a QR code and uses one web page to upload and download — nothing installed on the
 phone, no internet at install or run time. Working name; the product name comes later.
@@ -27,7 +33,7 @@ bash dockerspace/host_scripts/test_release.sh --target linux-x64   # release tes
 bash dockerspace/host_scripts/clean.sh [--image]                   # remove container (+ dev image)
 bash dockerspace/host_scripts/exec.sh bash dockerspace/container_scripts/env_check.sh
 bash dockerspace/host_scripts/exec.sh go test ./...           # unit tests
-bash dockerspace/host_scripts/run.sh [--stop MODE]            # run the server for a real phone test
+bash dockerspace/host_scripts/test_agent.sh                   # updown-agent: link, restarts (crash, idle), clean stop
 bash dockerspace/host_scripts/build.sh --all [--test]         # release packages (+ offline Linux test)
 bash dockerspace/host_scripts/build.sh --target linux-x64     # one target
 bash dockerspace/host_scripts/exec.sh go run ./cmd/updown --check
@@ -46,12 +52,15 @@ updown/
 │                                    windows/start.cmd, updown.conf (defaults)
 ├── docs/contract.md                 what every build must do
 ├── tools/mkzip/                     build-time zip tool (standard library only)
-├── start.sh, stop.sh, status.sh     dev container entry points (workspace: svcmgt/svc_policy.conf)
+├── start.sh, stop.sh, status.sh     start / stop the container; start + status show the link (workspace: svcmgt)
+├── updown-agent/                    the container's ENTRY POINT: builds + runs updown, hands out the link
+│   ├── agent.py                     (python3, standard library) · `agent.py link` = the current link
+│   └── updown.conf                  the service's settings (STOP_MODE=idle, 15 min, Downloads …)
 ├── dockerspace/
 │   ├── Dockerfile                   dev image: Go toolchain (never on the host)
-│   ├── docker-compose.yml           updown-dev-container · my_docker_network 172.28.0.70 · ports 8070-8079
+│   ├── docker-compose.yml           updown-dev-container · this PC's network (network_mode: host) · 8070-8079
 │   ├── .env                         GO_IMAGE, TEST_IMAGES (non-secret)
-│   ├── host_scripts/                start, stop, exec, shell, clean, pull_images, build, test_release
+│   ├── host_scripts/                start, stop, exec, shell, clean, pull_images, build, test_release, test_agent
 │   └── container_scripts/           env_check, build (run inside the container)
 └── release/                         build output (git-ignored): <RELEASE>/ + <RELEASE>.zip + .zip.sha256
 ```
@@ -72,17 +81,24 @@ ONLY that OS's files — `bin/updown[.exe]`, `start.sh` or `start.cmd`, `updown.
 files get CRLF line endings. `go vet` + `go test` run first; a failed build never replaces
 a good package.
 
-## Testing with the phone (development)
+## Using it — updown runs as a service ([2.1], UPDOWN-26)
 
-`bash dockerspace/host_scripts/run.sh` runs the server inside the dev container: it finds
-this PC's phone-reachable address (phone hotspot / USB tether first, then Wi-Fi), and
-Docker's published ports 8070–8079 carry the phone in. The console prints only a link to
-the host page plus the event log. Open that link in this PC's browser: it shows **two QR
-codes** and the live log.
+`bash start.sh` starts the container; inside, **updown-agent** (`updown-agent/agent.py`, the entry point)
+builds updown from this source (offline), starts it, and hands out its link. start.sh prints it:
+
+```
+[  OK  ] updown-dev-container running — updown is ready
+         open this link in this PC's browser for the QR codes (send / receive files):
+         http://172.20.10.2:8070/host?k=…
+```
+
+Open it in this PC's browser: **two QR codes** and the live log.
 
 - **Send files** QR → the phone's upload screen; files land in this PC's **Downloads**.
 - **Receive files** QR → the phone's download screen: this PC's **Downloads** files, newest
   first — tap one to save it on the phone.
-- `--stop enter | after-transfer | idle` (`--idle N` minutes); Enter or Ctrl+C stops it;
-  a closed terminal or killed run.sh also stops the server in the container.
+- The container uses this PC's network: updown picks the phone-reachable address itself (phone hotspot /
+  USB tether first, then Wi-Fi, then LAN) and listens on 8070–8079.
+- After 15 idle minutes updown stops and the agent starts it again with a **new link** — the current one:
+  `bash status.sh`. A crash is restarted the same way. Settings: `updown-agent/updown.conf`.
 
