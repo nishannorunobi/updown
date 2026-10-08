@@ -1,5 +1,5 @@
-# docker-compose.yml — updown's dev/build/test container. Nothing is installed on the host:
-# Go, builds and test runs all happen in here. Variables come from dockerspace/.env
+# docker-compose.yml — updown's container: updown-agent (the entry point, [2.1] UPDOWN-26) builds and runs
+# updown as a service; Go, builds and test runs also happen in here. Nothing is installed on the host. Variables come from dockerspace/.env
 # (GO_IMAGE) and host_scripts/start.sh (HOST_UID / HOST_GID).
 name: updown
 
@@ -19,17 +19,13 @@ services:
         CONTAINER_WORKDIR: /updown
     image: updown-dev-image:1.0
     container_name: updown-dev-container
-    hostname: updown-dev-container
     # Run as the host user: files the build writes into the bind-mounted project stay
     # owned by the owner, not root.
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    networks:
-      my_docker_network:
-        ipv4_address: 172.28.0.70          # static IP within my_docker_network's subnet
-    ports:
-      # The updown server under test listens here; the phone reaches the host's
-      # hotspot / Wi-Fi address on these ports (8000+ is left to backup/run_qr.sh).
-      - "8070-8079:8070-8079"
+    # This PC's network ([2.1]): updown finds the phone-reachable address (hotspot / Wi-Fi / LAN) itself and
+    # listens there on 8070-8079, exactly like on a customer PC — no address handed in by the host.
+    network_mode: host
+    command: ["python3", "/updown/updown-agent/agent.py"]
     volumes:
       - ..:/updown                                                      # the project (source + release/)
       - ../../../mountspace/logs:/mountspace/logs                       # mirror logs
@@ -40,7 +36,3 @@ services:
       CONTAINER_WORKDIR: /updown
       TZ: ${TZ:-America/New_York}
     restart: "no"
-
-networks:
-  my_docker_network:
-    external: true
