@@ -501,7 +501,9 @@ func human(n int64) string {
 
 func (s *Server) hostPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Security-Policy", "default-src 'self' 'unsafe-inline'")
+	// The page talks to updown and — only when CONTROLS_URL is set (always on this PC, checked by config) — to
+	// updown-agent's buttons; nothing else. data: images = the empty favicon.
+	w.Header().Set("Content-Security-Policy", strings.TrimSpace("default-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' "+s.o.ControlsURL))
 	w.Write(s.o.HostPage)
 }
 

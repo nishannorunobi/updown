@@ -47,7 +47,9 @@ updown/
 ├── internal/kv/                     KEY=VALUE reader (release.conf, updown.conf)
 ├── internal/release/                release.conf: find + load (name, version, target)
 ├── internal/config/                 updown.conf: defaults + validation (docs/contract.md §2)
-├── web/                             the phone page, embedded into the program
+├── internal/connection/             the ways to the phone, ONE FILE EACH: hotspot.go, usb.go, bluetooth.go,
+│                                    wifi.go, lan.go · device_connection.go (the phone's browser)
+├── web/                             the phone page + the PC's page (host.html + parts/: one file per block)
 ├── packaging/                       copied into every release: unix/start.sh,
 │                                    windows/start.cmd, updown.conf (defaults)
 ├── docs/contract.md                 what every build must do
@@ -55,12 +57,14 @@ updown/
 ├── start.sh, stop.sh, status.sh     start / stop the container; start + status show the link (workspace: svcmgt)
 ├── updown-agent/                    the container's ENTRY POINT: builds + runs updown, hands out the link
 │   ├── agent.py                     (python3, standard library) · `agent.py link` = the current link
-│   └── updown.conf                  the service's settings (STOP_MODE=idle, 15 min, Downloads …)
+│   ├── updown.conf                  the service's settings (STOP_MODE=idle, 15 min, Downloads, CONTROLS_URL …)
+│   ├── actions.conf                 the page's buttons, one line each → a file in actions/
+│   └── actions/                     one file per button: check_now.py, new_link.py, network_mode.py
 ├── dockerspace/
 │   ├── Dockerfile                   dev image: Go toolchain (never on the host)
 │   ├── docker-compose.yml           updown-dev-container · this PC's network (network_mode: host) · 8070-8079
 │   ├── .env                         GO_IMAGE, TEST_IMAGES (non-secret)
-│   ├── host_scripts/                start, stop, exec, shell, clean, pull_images, build, test_release, test_agent
+│   ├── host_scripts/                start, stop, exec, shell, clean, pull_images, build, test_release, test_agent, test_controls
 │   └── container_scripts/           env_check, build (run inside the container)
 └── release/                         build output (git-ignored): <RELEASE>/ + <RELEASE>.zip + .zip.sha256
 ```
@@ -104,6 +108,9 @@ Open it in this PC's browser: **two QR codes** and the live log.
 - **The page is always http://localhost:8070** (HOST_PORT) — only this PC can open it, the address never
   changes. updown itself opens the phone's door on the hotspot when it appears, moves it when the address
   changes and closes it when the hotspot is gone (the page turns red); each new door = new QR codes.
+- **The buttons** on the page ([2.7], `docs/ui/host_page_buttons_*.png`): 📶 Hotspot only / 🌐 Any network
+  (writes `BIND` into `updown-agent/updown.conf`, restarts updown), ⟳ Check now, 🔑 New link. Each is one line
+  in `updown-agent/actions.conf` + one file in `updown-agent/actions/` — a new button = a new line + a new file.
 - After 15 idle minutes updown stops and the agent starts it again (same page). A crash is restarted the
   same way. Settings: `updown-agent/updown.conf`.
 

@@ -51,6 +51,15 @@ Same `KEY=VALUE` format. Every key is optional; an empty or missing key takes th
 | `BIND` | `auto` | `auto` = pick the phone-reachable address (order: phone hotspot 172.20.10.x / USB tether, then Wi-Fi, then other private LAN) · `hotspot` = ONLY the phone hotspot / USB tether, never another network (none → exit 1 with the reason) · or one IPv4 address |
 | `ADVERTISE` | empty | the address put in the QR link when it differs from `BIND` (the dev container binds 0.0.0.0 and advertises the host's hotspot address) |
 | `MAX_FILE_GB` | `10` | largest single upload |
+| `CONNECTIONS` | `hotspot,usb,bluetooth,wifi,lan` | the ways to the phone that are watched, best first — each is its own file in `internal/connection/` (a new way = a new file + its name here). `BIND=hotspot` uses only the phone's own ones (hotspot, usb, bluetooth) ([2.7]) |
+| `CHECK_SECONDS` | `3` | how often the phone's network is checked (1-3600) |
+| `PAGE_PARTS` | `connection,qr_codes,transfer_log` | the PC page's blocks, top to bottom — each is `web/parts/NAME.html` |
+| `PAGE_REFRESH_SECONDS` | `1` | how often the PC's page asks for news (1-60) |
+| `LOG_LINES` | `500` | log lines kept for the page (10-100000) |
+| `CONTROLS_URL` | empty | where the page finds its buttons (updown-agent, `http://localhost:PORT` only); empty = no buttons |
+
+The six keys from `CONNECTIONS` down never stop updown: a wrong value runs on its default and the console says
+`WARN …` ([2.7], owner rule: defaults + never stop).
 
 ¹ Linux: `XDG_DOWNLOAD_DIR` from `~/.config/user-dirs.dirs`, else `~/Downloads`;
 Windows: `%USERPROFILE%\Downloads`; macOS: `~/Downloads`. Created if missing.
@@ -91,13 +100,25 @@ The phone link (with its token) is never printed to the console or a log.
 **Host page** — for this PC's browser, on its OWN listener **http://localhost:HOST_PORT** ([2.6], UPDOWN-52):
 loopback only (no other device can reach it), so no key; the Host header must be `localhost` / `127.0.0.1` /
 `::1` (no other web site can read it). The page and its parts (`/host/part/NAME.html`) never take the
-phone's session or count as activity. The phone's door never serves `/host` (403).
+phone's session or count as activity. The phone's door never serves `/host` (403). A `POST` is refused (403)
+when it carries an `Origin` other than the page itself — no other web site can press a button (CSRF); a
+program on this PC (no `Origin`, e.g. updown-agent) may. The page's CSP allows it to talk to itself and to
+`CONTROLS_URL` only.
+
+**The page's buttons** ([2.7]) belong to updown-agent, not to updown (updown runs without them):
+`updown-agent/actions.conf` lists them (`NAME | ICON | LABEL | FILE | SHOWN`), each runs its own file in
+`updown-agent/actions/` — `check_now.py`, `new_link.py`, `network_mode.py` (writes `BIND` into updown.conf and
+restarts updown). The agent serves `GET /actions` and `POST /action/NAME[?value=V]` on `CONTROLS_URL`
+(127.0.0.1 only, same Host / Origin rules). A missing or broken file greys out only its button.
 
 | Method + path | Does |
 |---|---|
 | `GET /host?k=` | the page: **two QR codes** — "Send files" (the phone's upload screen) and "Receive files" (the phone's download screen) — plus who is connected and the live log (one file, no external URL) |
 | `GET /host/qr/send.svg?k=` | QR code of the send link (SVG, black on white, quiet zone 4) |
 | `GET /host/qr/receive.svg?k=` | QR code of the receive link |
+| `GET /host/api/page` | `{"parts","refresh_seconds","controls_url"}` — how the page is built (PAGE_PARTS, PAGE_REFRESH_SECONDS, CONTROLS_URL) ([2.7]) |
+| `POST /host/api/check` | look at the phone's network now → `{"connection"}` ([2.7]) |
+| `POST /host/api/new-link` | a new token + new QR codes now (409 when there is no phone network) ([2.7]) |
 | `GET /host/api/status?k=&after=N` | `{"product","version","send","receive","phone","stop_mode","log":[{"n","time","line"}]}` — log lines after N (last 500 kept) |
 
 ## 5. The link and the token

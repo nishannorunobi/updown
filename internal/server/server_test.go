@@ -370,6 +370,9 @@ func TestHostLayoutAndControls(t *testing.T) {
 	if strings.Join(lay.Parts, ",") != "qr_codes,connection" || lay.Refresh != 2 || lay.ControlsURL != "http://localhost:8069" {
 		t.Errorf("layout: %+v", lay)
 	}
+	if csp := call("GET", "/", "").Header().Get("Content-Security-Policy"); !strings.Contains(csp, "connect-src 'self' http://localhost:8069") {
+		t.Errorf("the page may not reach its buttons: CSP %q", csp)
+	}
 	if w := call("POST", "/host/api/check", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"type":"usb"`) {
 		t.Errorf("check from a program on this PC: %d %s", w.Code, w.Body)
 	}

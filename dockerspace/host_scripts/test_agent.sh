@@ -29,7 +29,7 @@ docker ps --format '{{.Names}}' | grep -qx updown-dev-container && { bad "stop u
 docker image inspect "$IMG" >/dev/null 2>&1 || { bad "image $IMG missing — bash start.sh --build"; exit 1; }
 TMP="$(mktemp -d)"; mkdir -p "$TMP/dl" "$TMP/cache"
 cp -r "$_WS_ROOT/mountspace/data/myworkspace/projectspace/updown/gocache/." "$TMP/cache/" 2>/dev/null   # a warm cache: offline build
-sed 's/^IDLE_MINUTES=.*/IDLE_MINUTES=1/; s/^BIND=.*/BIND=auto/; s/^HOST_PORT=.*/HOST_PORT=8079/' "$PROJECT/updown-agent/updown.conf" > "$TMP/test.conf"   # any network (no hotspot needed); its own page port
+sed 's/^IDLE_MINUTES=.*/IDLE_MINUTES=1/; s/^BIND=.*/BIND=auto/; s/^HOST_PORT=.*/HOST_PORT=8079/; s#^CONTROLS_URL=.*#CONTROLS_URL=http://localhost:8067#' "$PROJECT/updown-agent/updown.conf" > "$TMP/test.conf"   # any network (no hotspot needed); its own page port
 cleanup() { docker rm -f "$T" "$T-none" >/dev/null 2>&1; rm -rf "$TMP"; }
 trap cleanup EXIT
 link() { docker exec "$T" python3 /updown/updown-agent/agent.py link "${1:-60}" 2>/dev/null; }

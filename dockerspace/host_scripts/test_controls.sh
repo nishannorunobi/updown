@@ -11,10 +11,11 @@
 #             C5 🔑 New link (new_link.py) → a new token: the page's link changes
 #             C6 another web site can press no button (agent and updown both answer 403); other Host → 403
 #             C7 the switch (network_mode.py) → BIND written into updown.conf, updown restarted, the page back
+#             C8 in a real browser (headless Chrome, when installed) the page draws the buttons — CSP lets it reach them
 # How         bash dockerspace/host_scripts/test_controls.sh        (~1 minute)
 # Exit        0 = all passed
 # ─────────────────────────────────────────────────────────────────────────────
-case "${1:-}" in -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; esac
+case "${1:-}" in -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; esac
 set -uo pipefail
 _WS_ROOT="$(d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; while [ ! -d "$d/mountspace" ] && [ "$d" != "/" ]; do d="$(dirname "$d")"; done; echo "$d")"
 if [ -f "$_WS_ROOT/init/create_logging_path.sh" ]; then source "$_WS_ROOT/init/create_logging_path.sh"; setup_logging; fi
@@ -88,6 +89,14 @@ on="$(js "[o['value'] for o in d['actions'][0]['options'] if o['on']]" "$(curl -
 grep -qx 'BIND=hotspot' "$TMP/agent/updown.conf" && [ "$on" = "['hotspot']" ] && [ "$(js "d['ok']" "$r")" = True ] \
   && docker exec "$T" python3 /updown/updown-agent/agent.py link 60 >/dev/null && [ -n "$(status)" ] \
   && ok "C7 the switch → BIND=hotspot in updown.conf, updown restarted, the page answers, the switch shows it" || bad "C7 $r on=$on"
+
+# C8 — a real browser (curl ignores the page's CSP; a browser does not)
+CH="$(command -v google-chrome chromium chromium-browser 2>/dev/null | head -1)"
+if [ -z "$CH" ]; then echo "[ SKIP ] C8 no Chrome / Chromium on this PC"
+else
+  n="$(timeout 60 "$CH" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=8000 --dump-dom "$PAGE/" 2>/dev/null | grep -o 'data-a="[a-z_]*"' | sort -u | tr '\n' ' ')"
+  [ "$n" = 'data-a="broken" data-a="check_now" data-a="network_mode" data-a="new_link" ' ] && ok "C8 a real browser draws the buttons: $n" || bad "C8 the browser shows [$n]"
+fi
 
 [ "$FAIL" = 0 ] && ok "page button tests passed (throwaway container removed)" && exit 0
 docker logs "$T" 2>&1 | tail -15
