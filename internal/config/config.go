@@ -1,5 +1,7 @@
 // Package config reads updown.conf — the user's settings (docs/contract.md §2). Every key
-// is optional; a missing or empty key takes its default.
+// is optional; a missing or empty key takes its default. The page's and the network watcher's settings
+// ([2.7]: CHECK_SECONDS, CONNECTIONS, PAGE_PARTS, PAGE_REFRESH_SECONDS, LOG_LINES, CONTROLS_URL) never stop
+// updown: a wrong value runs on its default and is reported in Warnings.
 package config
 
 import (
@@ -12,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/nishannorunobi/updown/internal/connection"
 	"github.com/nishannorunobi/updown/internal/kv"
 )
 
@@ -34,7 +37,18 @@ type Config struct {
 	Advertise   string // ADVERTISE — address for the QR link when it differs from BIND
 	MaxFileGB   int    // MAX_FILE_GB
 	Path        string // the file read ("" = defaults only)
+
+	CheckSeconds   int      // CHECK_SECONDS — how often the phone's network is checked
+	Connections    []string // CONNECTIONS — the ways to the phone that are watched, best first (internal/connection)
+	PageParts      []string // PAGE_PARTS — the blocks of the PC's page, top to bottom (web/parts/NAME.html)
+	PageRefreshSec int      // PAGE_REFRESH_SECONDS — how often the PC's page asks for news
+	LogLines       int      // LOG_LINES — log lines kept for the page
+	ControlsURL    string   // CONTROLS_URL — where the page finds its buttons (updown-agent); "" = no buttons
+	Warnings       []string // values that were wrong and replaced by their default
 }
+
+// DefaultPageParts is PAGE_PARTS when updown.conf does not set it.
+const DefaultPageParts = "connection,qr_codes,transfer_log"
 
 // Default is the configuration with no updown.conf at all.
 func Default() Config {
@@ -46,7 +60,24 @@ func Default() Config {
 		HostPort:    8070,
 		Bind:        "auto",
 		MaxFileGB:   10,
+
+		CheckSeconds:   3,
+		Connections:    list(connection.DefaultOrder),
+		PageParts:      list(DefaultPageParts),
+		PageRefreshSec: 1,
+		LogLines:       500,
 	}
+}
+
+// list splits "a, b,c" into its names.
+func list(v string) []string {
+	var out []string
+	for _, n := range strings.Split(v, ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // Load reads path over the defaults. A missing file is fine when optional is true.
@@ -87,9 +118,55 @@ func Load(path string, optional bool) (Config, error) {
 			return c, err
 		}
 	}
+	c.soft(m)
 	c.ReceiveDir = expandHome(c.ReceiveDir)
 	c.ShareDir = expandHome(c.ShareDir)
 	return c, c.Validate()
+}
+
+// soft reads the keys that never stop updown: a wrong value → its default + a warning.
+func (c *Config) soft(m map[string]string) {
+	warn := func(f string, a ...any) { c.Warnings = append(c.Warnings, fmt.Sprintf(f, a...)) }
+	num := func(key string, dst *int, min, max int) {
+		v := strings.TrimSpace(m[key])
+		if v == "" {
+			return
+		}
+		if n, err := strconv.Atoi(v); err == nil && n >= min && n <= max {
+			*dst = n
+			return
+		}
+		warn("%s=%s is not a number from %d to %d — using the default %d", key, v, min, max, *dst)
+	}
+	num("CHECK_SECONDS", &c.CheckSeconds, 1, 3600)
+	num("PAGE_REFRESH_SECONDS", &c.PageRefreshSec, 1, 60)
+	num("LOG_LINES", &c.LogLines, 10, 100000)
+
+	if v := strings.TrimSpace(m["CONNECTIONS"]); v != "" {
+		var known []string
+		for _, n := range list(v) {
+			if _, ok := connection.Get(n); ok {
+				known = append(known, n)
+			} else {
+				warn("CONNECTIONS: unknown way %q (known: %s) — left out", n, strings.Join(connection.Names(), ", "))
+			}
+		}
+		if len(known) == 0 {
+			warn("CONNECTIONS=%s names no known way — using the default %s", v, connection.DefaultOrder)
+			known = list(connection.DefaultOrder)
+		}
+		c.Connections = known
+	}
+	if v := strings.TrimSpace(m["PAGE_PARTS"]); v != "" {
+		c.PageParts = list(v) // checked against the embedded parts by updown (it knows them)
+	}
+	if v := strings.TrimSpace(m["CONTROLS_URL"]); v != "" {
+		if strings.HasPrefix(v, "http://localhost:") || strings.HasPrefix(v, "http://127.0.0.1:") {
+			c.ControlsURL = strings.TrimRight(v, "/")
+		} else {
+			warn("CONTROLS_URL=%s must be on this PC (http://localhost:PORT) — no buttons on the page", v)
+		}
+	}
 }
 
 // Validate checks every value against the contract.

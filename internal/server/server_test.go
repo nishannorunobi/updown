@@ -341,13 +341,51 @@ func TestStatusConnectionAndBrowser(t *testing.T) {
 	if st.Connection.Via != "wifi" || st.Connection.State != "hotspot" || st.Phone != "172.20.10.1" || st.Agent != "iPhone · Safari" {
 		t.Errorf("status: %+v phone=%q agent=%q", st.Connection, st.Phone, st.Agent)
 	}
-	for ua, want := range map[string]string{
-		"Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36":                 "Android · Chrome",
-		"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) AppleWebKit/605.1.15 CriOS/120.0 Mobile/15E148 Safari/604.1": "iPhone · Chrome",
-		"": "phone",
-	} {
-		if got := browserOf(ua); got != want {
-			t.Errorf("browserOf(%q) = %q, want %q", ua, got, want)
+}
+
+// [2.7]: the page's layout comes from updown.conf; the control points run only for this page or a program
+// on this PC — never for another web site (CSRF).
+func TestHostLayoutAndControls(t *testing.T) {
+	checks := 0
+	s := New(Options{Token: tok, Page: web.Index, HostPage: web.Host, HostParts: web.Parts,
+		PageParts: []string{"qr_codes", "connection"}, PageRefreshSec: 2, ControlsURL: "http://localhost:8069",
+		OnCheck: func() (Connection, error) { checks++; return Connection{State: "hotspot", Type: "usb"}, nil }})
+	h := s.HostHandler()
+	call := func(method, path, origin string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, nil)
+		r.Host = "localhost:8070"
+		if origin != "" {
+			r.Header.Set("Origin", origin)
 		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	var lay struct {
+		Parts       []string `json:"parts"`
+		Refresh     int      `json:"refresh_seconds"`
+		ControlsURL string   `json:"controls_url"`
+	}
+	json.Unmarshal(call("GET", "/host/api/page", "").Body.Bytes(), &lay)
+	if strings.Join(lay.Parts, ",") != "qr_codes,connection" || lay.Refresh != 2 || lay.ControlsURL != "http://localhost:8069" {
+		t.Errorf("layout: %+v", lay)
+	}
+	if w := call("POST", "/host/api/check", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"type":"usb"`) {
+		t.Errorf("check from a program on this PC: %d %s", w.Code, w.Body)
+	}
+	if w := call("POST", "/host/api/check", "http://localhost:8070"); w.Code != 200 {
+		t.Errorf("check from the page itself: %d", w.Code)
+	}
+	if w := call("POST", "/host/api/check", "https://evil.example"); w.Code != http.StatusForbidden {
+		t.Errorf("check from another web site: %d, want 403", w.Code)
+	}
+	if checks != 2 {
+		t.Errorf("OnCheck ran %d times, want 2", checks)
+	}
+	if w := call("POST", "/host/api/new-link", ""); w.Code != http.StatusNotImplemented {
+		t.Errorf("new-link without a handler: %d, want 501", w.Code)
+	}
+	if w := call("GET", "/host/api/check", ""); w.Code == 200 {
+		t.Errorf("GET must not run a control point")
 	}
 }

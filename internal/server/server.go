@@ -26,6 +26,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/nishannorunobi/updown/internal/connection"
 )
 
 // Options configure one server run.
@@ -49,6 +51,15 @@ type Options struct {
 	ReceiveLink string // QR "Receive files" → the phone's download screen (/receive)
 	SendQR      string // the two QR codes as SVG
 	ReceiveQR   string
+
+	// The PC's page and its two control points ([2.7]) — updown.conf: PAGE_PARTS, PAGE_REFRESH_SECONDS,
+	// CONTROLS_URL, LOG_LINES. The buttons themselves live in updown-agent (actions.conf); they call these.
+	PageParts      []string                   // the page's blocks, top to bottom
+	PageRefreshSec int                        // how often the page asks for news
+	ControlsURL    string                     // where the page finds its buttons ("" = none)
+	LogKeep        int                        // log lines kept for the page (0 = 500)
+	OnCheck        func() (Connection, error) // POST /host/api/check: look at the phone's network now
+	OnNewLink      func() (Connection, error) // POST /host/api/new-link: a new token + new QR codes now
 }
 
 // Link is the phone's current way in: a token and the two QR codes that carry it (contract §5).
@@ -60,6 +71,7 @@ type Link struct {
 // Connection is what the host page shows about the phone's network ([2.6], UPDOWN-52).
 type Connection struct {
 	State  string    `json:"state"`  // none · hotspot · lan
+	Type   string    `json:"type"`   // the way (internal/connection): hotspot · usb · bluetooth · wifi · lan · "" (none)
 	Via    string    `json:"via"`    // wifi · usb · bluetooth · lan · "" (none)
 	PC     string    `json:"pc"`     // this PC's address on it ("" = none)
 	Iface  string    `json:"iface"`  // e.g. wlo1, enx…, bnep0
@@ -73,8 +85,6 @@ type logLine struct {
 	Time time.Time `json:"time"`
 	Line string    `json:"line"`
 }
-
-const logKeep = 500
 
 // Server handles every request. Create it with New.
 type Server struct {
@@ -98,8 +108,8 @@ func (s *Server) Log(format string, args ...any) {
 	s.logMu.Lock()
 	s.logN++
 	s.logs = append(s.logs, logLine{N: s.logN, Time: time.Now(), Line: line})
-	if len(s.logs) > logKeep {
-		s.logs = s.logs[len(s.logs)-logKeep:]
+	if len(s.logs) > s.o.LogKeep {
+		s.logs = s.logs[len(s.logs)-s.o.LogKeep:]
 	}
 	s.logMu.Unlock()
 	s.o.Logf("%s", line)
@@ -122,6 +132,12 @@ func New(o Options) *Server {
 	if o.OnTransfer == nil {
 		o.OnTransfer = func() {}
 	}
+	if o.LogKeep <= 0 {
+		o.LogKeep = 500
+	}
+	if o.PageRefreshSec <= 0 {
+		o.PageRefreshSec = 1
+	}
 	s := &Server{o: o, mux: http.NewServeMux(), hostMux: http.NewServeMux(),
 		link: Link{o.Token, o.SendLink, o.ReceiveLink, o.SendQR, o.ReceiveQR}}
 	s.lastSeen.Store(time.Now().UnixNano())
@@ -138,6 +154,9 @@ func New(o Options) *Server {
 	s.hostMux.HandleFunc("GET /host/qr/receive.svg", s.hostQR(func() string { return s.Link().ReceiveQR }))
 	s.hostMux.HandleFunc("GET /host/api/status", s.hostStatus)
 	s.hostMux.HandleFunc("GET /host/part/{name}", s.hostPart)
+	s.hostMux.HandleFunc("GET /host/api/page", s.hostLayout)
+	s.hostMux.HandleFunc("POST /host/api/check", s.hostControl(func() func() (Connection, error) { return s.o.OnCheck }))
+	s.hostMux.HandleFunc("POST /host/api/new-link", s.hostControl(func() func() (Connection, error) { return s.o.OnNewLink }))
 	s.hostMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, http.StatusNotFound, "not found") })
 	return s
 }
@@ -156,9 +175,13 @@ func (s *Server) SetLink(l Link) {
 // SetConnection records the phone's network for the host page.
 func (s *Server) SetConnection(c Connection) { s.mu.Lock(); s.conn = c; s.mu.Unlock() }
 
+// Connection returns the phone's network as the host page sees it.
+func (s *Server) Connection() Connection { s.mu.Lock(); defer s.mu.Unlock(); return s.conn }
+
 // HostHandler serves the PC's page on its own loopback listener (http://localhost:8070): no key — it can
 // only be reached from this PC — but the Host header must name this PC, so no other web site can read it
-// (DNS rebinding). It never claims the phone's session and never counts as activity.
+// (DNS rebinding). A POST (the control points) must come from this page itself or from a program on this PC
+// (no Origin) — never from another web site (CSRF). It never claims the phone's session and never counts as activity.
 func (s *Server) HostHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -168,6 +191,10 @@ func (s *Server) HostHandler() http.Handler {
 		}
 		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
 			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		if o := r.Header.Get("Origin"); r.Method != http.MethodGet && r.Method != http.MethodHead && o != "" && o != "http://"+r.Host {
+			fail(w, http.StatusForbidden, "only this page may do that")
 			return
 		}
 		s.hostMux.ServeHTTP(w, r)
@@ -201,7 +228,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
 	s.mu.Lock()
 	if s.owner == "" {
-		s.owner, s.agent = ip, browserOf(r.UserAgent())
+		s.owner, s.agent = ip, connection.Device(r.UserAgent())
 		s.Log("phone connected: %s (%s)", ip, s.agent)
 	}
 	owner := s.owner
@@ -213,35 +240,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.lastSeen.Store(time.Now().UnixNano())
 	s.mux.ServeHTTP(w, r)
-}
-
-// browserOf turns a User-Agent into "iPhone · Safari" (the phone's own name is never sent by a browser).
-func browserOf(ua string) string {
-	dev := "phone"
-	for _, d := range []string{"iPhone", "iPad", "Android", "Windows", "Macintosh", "Linux"} {
-		if strings.Contains(ua, d) {
-			dev = d
-			break
-		}
-	}
-	if dev == "Macintosh" {
-		dev = "Mac"
-	}
-	br := ""
-	switch {
-	case strings.Contains(ua, "CriOS"), strings.Contains(ua, "Chrome/") && !strings.Contains(ua, "Edg/"):
-		br = "Chrome"
-	case strings.Contains(ua, "FxiOS"), strings.Contains(ua, "Firefox/"):
-		br = "Firefox"
-	case strings.Contains(ua, "Edg"):
-		br = "Edge"
-	case strings.Contains(ua, "Safari/"):
-		br = "Safari"
-	}
-	if br == "" {
-		return dev
-	}
-	return dev + " · " + br
 }
 
 func clientIP(r *http.Request) string {
@@ -552,4 +550,30 @@ func (s *Server) hostStatus(w http.ResponseWriter, r *http.Request) {
 		"connection": conn, "phone_agent": agent,
 		"phone": owner, "stop_mode": s.o.StopMode, "log": lines,
 	})
+}
+
+// hostLayout: how the PC's page is built — its blocks (PAGE_PARTS), how often it asks for news, where its buttons are.
+func (s *Server) hostLayout(w http.ResponseWriter, r *http.Request) {
+	parts := s.o.PageParts
+	if parts == nil {
+		parts = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"parts": parts, "refresh_seconds": s.o.PageRefreshSec, "controls_url": s.o.ControlsURL})
+}
+
+// hostControl runs one control point and answers with the connection after it.
+func (s *Server) hostControl(f func() func() (Connection, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		do := f()
+		if do == nil {
+			fail(w, http.StatusNotImplemented, "not available")
+			return
+		}
+		c, err := do()
+		if err != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "connection": c})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"connection": c})
+	}
 }

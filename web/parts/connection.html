@@ -2,7 +2,9 @@
      <div data-part="connection.html">). Approved mock v4.1 (UPDOWN-44). Reads the page's "updown:status" event:
      green = the phone has a page open · amber = updown serves on the phone's network, no phone yet ·
      red = no phone network · grey = updown not reachable (restarting). Data: status.connection + phone_agent ([2.6]).
-     Sets <body data-conn="ok|warn|bad|off"> so other parts (the QR codes) can react. -->
+     Sets <body data-conn="ok|warn|bad|off"> so other parts (the QR codes) can react.
+     Its buttons ([2.7]) come from updown-agent (CONTROLS_URL in updown.conf → GET /actions, POST /action/NAME): a
+     switch for an action with choices, a button for the others, greyed with the reason when its file is broken. -->
 <style>
 
   /* the connection block (approved mock v4.1) */
@@ -77,17 +79,8 @@
 
   <div class="facts" id="c-facts"></div>
 
-  <div class="controls">
-    <span class="muted">Network:</span>
-    <div class="seg" id="c-mode">
-      <button class="on" data-m="hotspot" disabled title="comes with the back end">📶 Hotspot only</button>
-      <button data-m="auto" disabled title="comes with the back end">🌐 Any network</button>
-    </div>
-    <span class="spacer"></span>
-    <button class="btn" disabled title="comes with the back end">⟳ Check now</button>
-    <button class="btn" disabled title="comes with the back end">🔑 New link</button>
-    <div class="later">The switch shows the mode in use; changing it and the buttons come in a later story — today the network is set in updown's settings (BIND).</div>
-  </div>
+  <!-- the buttons: drawn from updown-agent's actions.conf ([2.7]) — each runs its own file in updown-agent/actions/ -->
+  <div class="controls" id="c-controls"><div class="later">Loading the buttons…</div></div>
 
   <details id="c-howto">
     <summary>How to connect the phone</summary>
@@ -120,7 +113,7 @@
   const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
   const hostOf = link => { try { return new URL(link).hostname; } catch (_) { return ""; } };
   const VIA = { wifi: "Wi-Fi", usb: "USB", bluetooth: "Bluetooth", lan: "a cable / LAN" };
-  const WAY = { wifi: 0, usb: 1, lan: 2 };                         // which "How to connect" card is in use
+  const WAY = { hotspot: 0, usb: 1, wifi: 2, lan: 2 };             // which "How to connect" card is in use (by type)
   const time = d => d.toLocaleTimeString();
   function log(cls, text, when) {
     const li = document.createElement("li");
@@ -134,11 +127,42 @@
     $("c-detail").textContent = detail;
     $("c-facts").innerHTML = facts.map(([a, b]) => `<div><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join("");
     $("c-howto").open = state === "bad" || state === "off";
-    const used = conn && conn.state !== "none" ? WAY[conn.via] : -1;
+    const used = conn && conn.state !== "none" ? WAY[conn.type || conn.via] : -1;
     document.querySelectorAll("#c-howto .way").forEach((w, i) => w.classList.toggle("used", i === used));
-    if (conn && conn.state !== "none")                        // the switch shows the mode in use
-      document.querySelectorAll("#c-mode button").forEach(b => b.classList.toggle("on", (b.dataset.m === "auto") === (conn.state === "lan")));
   }
+
+  // ── the buttons ([2.7]) ──
+  const box = $("c-controls");
+  const note = t => { box.innerHTML = `<div class="later">${esc(t)}</div>`; };
+  async function drawControls() {
+    const url = window.updown.controls;
+    if (!url) return note("No buttons: CONTROLS_URL is not set in updown.conf (updown runs without updown-agent).");
+    let list;
+    try { list = (await (await fetch(url + "/actions", { cache: "no-store" })).json()).actions; }
+    catch (_) { return note("No buttons: updown-agent is not reachable at " + url + " — they come back by themselves."); }
+    const btn = (a, o, cls) => `<button class="${cls}" data-a="${esc(a.name)}" data-v="${o ? esc(o.value) : ""}"` +
+      `${a.ok ? "" : " disabled"} title="${esc(a.reason)}">${esc(o ? (o.icon || "") + " " + o.label : a.icon + " " + a.label)}</button>`;
+    let h = "";
+    for (const a of list.filter(a => a.options))
+      h += `<span class="muted">${esc(a.label)}:</span><div class="seg">${a.options.map(o => btn(a, o, o.on ? "on" : "")).join("")}</div>`;
+    h += `<span class="spacer"></span>` + list.filter(a => !a.options).map(a => btn(a, null, "btn")).join("");
+    h += list.filter(a => !a.ok).map(a => `<div class="warnline">${esc(a.icon + " " + a.label)}: ${esc(a.reason)}</div>`).join("");
+    box.innerHTML = h || `<div class="later">No buttons in actions.conf.</div>`;
+  }
+  box.addEventListener("click", async e => {
+    const b = e.target.closest("button[data-a]");
+    if (!b || b.disabled || b.classList.contains("on")) return;
+    box.querySelectorAll("button").forEach(x => x.disabled = true);
+    try {
+      const r = await fetch(window.updown.controls + "/action/" + encodeURIComponent(b.dataset.a) +
+                            (b.dataset.v ? "?value=" + encodeURIComponent(b.dataset.v) : ""), { method: "POST" });
+      const j = await r.json();
+      log(j.ok ? "ok" : "bad", b.textContent.trim() + " — " + (j.message || j.error || r.status));
+    } catch (_) { log("bad", b.textContent.trim() + " — updown-agent is not reachable"); }
+    drawControls();
+  });
+  drawControls();
+  setInterval(drawControls, 30000);                          // a hand edit of updown.conf / actions.conf shows by itself
   document.addEventListener("updown:status", e => {
     const d = e.detail;
     if (d.error) {
@@ -158,7 +182,7 @@
       since = null;
       show("bad", "No phone found", "This PC is not on your phone's hotspot — switch on the iPhone's Personal Hotspot and join it " +
            "(Wi-Fi, USB or Bluetooth). The QR codes appear as soon as it is found.",            // updown's exact reason: the log below
-           [["This PC", "not on a phone network"], ["Phone", "—"], ["Mode", "📶 Hotspot only"], ["Last check", "just now"]], c);
+           [["This PC", "not on a phone network"], ["Phone", "—"], ["Last check", "just now"]], c);
     } else if (s.phone) {
       if (!since) since = new Date();
       show("ok", "Connected — " + (s.phone_agent || "phone"), "Ready to transfer: the phone has an updown page open.",

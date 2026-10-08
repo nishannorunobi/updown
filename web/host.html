@@ -37,10 +37,13 @@
     <div class="muted" id="version"></div>
   </section>
 
-  <!-- each block below is a SEPARATE part file (web/parts/), loaded into its div -->
-  <div data-part="connection.html"></div>
-  <div data-part="qr_codes.html"></div>
-  <div data-part="transfer_log.html"></div>
+  <!-- each block below is a SEPARATE part file (web/parts/), loaded into its div. Which blocks, in which order:
+       updown.conf PAGE_PARTS ([2.7], /host/api/page) — these three are only the fallback -->
+  <div id="parts">
+    <div data-part="connection.html"></div>
+    <div data-part="qr_codes.html"></div>
+    <div data-part="transfer_log.html"></div>
+  </div>
 </main>
 
 <script>
@@ -48,8 +51,23 @@
 // The host key, for the parts: every request of this page carries ?k=…
 window.updown = { k: "?k=" + encodeURIComponent(new URLSearchParams(location.search).get("k") || "") };
 
+// The page's layout from updown.conf ([2.7]): the blocks (PAGE_PARTS), how often to ask for news
+// (PAGE_REFRESH_SECONDS), where the buttons are (CONTROLS_URL → window.updown.controls, used by the parts).
+let refresh = 1000;
+async function layout() {
+  try {
+    const r = await fetch("/host/api/page" + window.updown.k, { cache: "no-store" });
+    if (!r.ok) return;
+    const l = await r.json();
+    refresh = Math.max(1, l.refresh_seconds || 1) * 1000;
+    window.updown.controls = l.controls_url || "";
+    const box = document.getElementById("parts");
+    box.replaceChildren(...l.parts.map(name => { const d = document.createElement("div"); d.dataset.part = name; return d; }));
+  } catch (_) {}                                                   // keep the fallback blocks
+}
+
 // Part loader: every <div data-part="FILE"> gets /host/part/FILE; its <script> blocks run after.
-const parts = [...document.querySelectorAll("[data-part]")].map(async div => {
+const loadParts = () => [...document.querySelectorAll("[data-part]")].map(async div => {
   try {
     const r = await fetch("/host/part/" + div.dataset.part + window.updown.k, { cache: "no-store" });
     if (!r.ok) throw new Error(r.status);
@@ -76,9 +94,9 @@ async function poll() {
     }
   } catch (_) { detail = { error: "down" }; }
   document.dispatchEvent(new CustomEvent("updown:status", { detail }));
-  setTimeout(poll, detail.error ? 3000 : 1000);
+  setTimeout(poll, detail.error ? Math.max(3000, refresh) : refresh);
 }
-Promise.all(parts).then(poll);
+layout().then(() => Promise.all(loadParts())).then(poll);
 </script>
 </body>
 </html>

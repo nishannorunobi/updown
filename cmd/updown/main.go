@@ -13,17 +13,19 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/nishannorunobi/updown/internal/config"
-	"github.com/nishannorunobi/updown/internal/netaddr"
+	"github.com/nishannorunobi/updown/internal/connection"
 	"github.com/nishannorunobi/updown/internal/phonenet"
 	"github.com/nishannorunobi/updown/internal/qr"
 	"github.com/nishannorunobi/updown/internal/release"
@@ -104,11 +106,28 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return fail("cannot open the PC's page on 127.0.0.1:%d (HOST_PORT): %v", cfg.HostPort, err)
 	}
 	transferred := make(chan struct{}, 1)
-	srv := server.New(server.Options{
+	controls := make(chan control) // the page's control points, run by the loop below ([2.7])
+	var srv *server.Server
+	ask := func(newLink bool) func() (server.Connection, error) {
+		return func() (server.Connection, error) {
+			c := control{newLink: newLink, reply: make(chan error, 1)}
+			select {
+			case controls <- c:
+			case <-time.After(10 * time.Second):
+				return server.Connection{}, errors.New("updown is busy — try again")
+			}
+			err := <-c.reply
+			return srv.Connection(), err
+		}
+	}
+	parts, partWarnings := pageParts(cfg.PageParts)
+	srv = server.New(server.Options{
 		Product: rel.ProductName, Version: rel.Version,
 		ReceiveDir: cfg.ReceiveDir, ShareDir: cfg.ShareDir, ShareFiles: shareFiles,
 		StopMode: cfg.StopMode, MaxBytes: int64(cfg.MaxFileGB) << 30,
 		Page: web.Index, HostPage: web.Host, HostParts: web.Parts,
+		PageParts: parts, PageRefreshSec: cfg.PageRefreshSec, ControlsURL: cfg.ControlsURL, LogKeep: cfg.LogLines,
+		OnCheck: ask(false), OnNewLink: ask(true),
 		Logf: func(f string, a ...any) { say(f, a...) },
 		OnTransfer: func() {
 			select {
@@ -122,6 +141,9 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		offered = -1
 	}
 	srv.Log("%s — uploads to: %s — phone sees: %s — stop: %s", rel.Release, cfg.ReceiveDir, offeredText(offered, cfg.ShareDir), stopText(cfg))
+	for _, w := range append(cfg.Warnings, partWarnings...) {
+		srv.Log("WARN %s: %s", orDefault(cfg.Path), w)
+	}
 	hs := &http.Server{Handler: srv.HostHandler(), ReadHeaderTimeout: 30 * time.Second}
 	served := make(chan error, 1)
 	go func() { served <- hs.Serve(hostLn) }()
@@ -177,14 +199,14 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				srv.SetConnection(server.Connection{State: "none", Reason: err.Error(), Since: time.Now()})
 				return
 			}
-			st, via, iface := "lan", "lan", ""
+			st, ty, via, iface := "lan", "", "lan", ""
 			if now.Cand != nil {
-				via, iface = now.Cand.Via(), now.Cand.Iface
-				if now.Cand.Kind == netaddr.Hotspot {
+				ty, via, iface = now.Cand.Type.Name, now.Cand.Type.Via, now.Cand.Iface
+				if now.Cand.Type.Phone {
 					st = "hotspot"
 				}
 			}
-			srv.SetConnection(server.Connection{State: st, Via: via, PC: now.Listen, Iface: iface, Since: time.Now()})
+			srv.SetConnection(server.Connection{State: st, Type: ty, Via: via, PC: now.Listen, Iface: iface, Since: time.Now()})
 			srv.Log("waiting for the phone — %s", stopHint(cfg))
 			return
 		}
@@ -207,7 +229,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}()
 	}
 	idle := time.Duration(cfg.IdleMinutes) * time.Minute
-	tick := time.NewTicker(3 * time.Second) // also how often the phone's network is checked
+	tick := time.NewTicker(time.Duration(cfg.CheckSeconds) * time.Second) // CHECK_SECONDS: how often the phone's network is checked
 	defer tick.Stop()
 
 	reason := ""
@@ -222,6 +244,17 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				time.Sleep(time.Second) // let the last response reach the phone
 				reason = "transfer finished"
 			}
+		case c := <-controls: // a button on the page (through updown-agent)
+			if c.newLink {
+				if !watch.Last().Open() {
+					c.reply <- errors.New("no phone network — there is no link to renew")
+					continue
+				}
+				srv.Log("new link asked for — the old QR codes stop working")
+				watch.Reset() // the next check reopens the door: a new token, new QR codes
+			}
+			follow()
+			c.reply <- nil
 		case err := <-served:
 			return fail("the PC's page stopped: %v", err)
 		case <-tick.C:
@@ -239,18 +272,43 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// choose decides where the phone's door goes now (BIND, ADVERTISE) — or why there is none.
+// control is one press of a button on the page: look again now (check) or hand out a new link.
+type control struct {
+	newLink bool
+	reply   chan error
+}
+
+// pageParts keeps the PAGE_PARTS that exist (web/parts/NAME.html); unknown ones → a warning, none → the default.
+func pageParts(names []string) ([]string, []string) {
+	var ok, warns []string
+	for _, n := range names {
+		if _, err := fs.Stat(web.Parts, "parts/"+n+".html"); err == nil {
+			ok = append(ok, n+".html")
+		} else {
+			warns = append(warns, fmt.Sprintf("PAGE_PARTS: no block %q (web/parts/%s.html) — left out", n, n))
+		}
+	}
+	if len(ok) == 0 {
+		warns = append(warns, "PAGE_PARTS names no block — using the default "+config.DefaultPageParts)
+		for _, n := range strings.Split(config.DefaultPageParts, ",") {
+			ok = append(ok, n+".html")
+		}
+	}
+	return ok, warns
+}
+
+// choose decides where the phone's door goes now (BIND, ADVERTISE, CONNECTIONS) — or why there is none.
 func choose(cfg config.Config) phonenet.Choice {
-	cands := netaddr.Candidates()
+	cands := connection.Candidates(cfg.Connections)
 	var c phonenet.Choice
 	switch cfg.Bind {
 	case "auto", "hotspot":
-		cand, err := netaddr.Pick(cfg.Bind, cands)
+		cand, err := connection.Pick(cfg.Bind, cands)
 		if err != nil {
 			return phonenet.Choice{Reason: err.Error()}
 		}
 		ip := cand.IP.String()
-		c = phonenet.Choice{Cand: &cand, Listen: ip, QR: ip, How: cand.Kind.String() + " on " + cand.Iface}
+		c = phonenet.Choice{Cand: &cand, Listen: ip, QR: ip, How: cand.Type.Label + " on " + cand.Iface}
 	default:
 		c = phonenet.Choice{Listen: cfg.Bind, QR: cfg.Bind, How: "BIND"}
 		if cfg.Bind == "0.0.0.0" {
