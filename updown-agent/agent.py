@@ -9,6 +9,9 @@
 #             3. read its "[updown] open this page …" line → print the link + keep it (for start.sh / status.sh)
 #             4. watch it: updown stopped (idle) or crashed → start it again → a NEW link;
 #                docker stop → passed on to updown → clean exit
+#             5. follow the PC's network ([2.4], UPDOWN-35): every 5 s it asks `updown --address` which address
+#                the settings allow (BIND=hotspot: ONLY the phone's hotspot). Changed → updown restarted on the new
+#                address (new link). None → updown stopped, "waiting for the phone's hotspot", started when it is back
 # How         command in docker-compose.yml:  python3 /updown/updown-agent/agent.py
 #             python3 /updown/updown-agent/agent.py link [SECONDS]   → prints the current link (waits up to
 #                                                                     SECONDS, default 60), exit 1 if none
@@ -26,6 +29,9 @@ LINK_FILE = os.path.join(STATE, "link")
 BINARY = os.path.join(STATE, "updown")
 LOG_DIR = os.path.join(os.environ.get("LOG_MIRROR_ROOT", "/tmp"), "updown-agent")
 LINK_RE = re.compile(r"open this page on this PC to show the QR codes: (\S+)")
+LISTEN_RE = re.compile(r"listening on (\d+\.\d+\.\d+\.\d+):\d+")
+WATCH_SECONDS = 5
+ADDRESS_CMD = os.environ.get("UPDOWN_AGENT_ADDRESS_CMD")              # tests only: a shell command instead of updown --address
 
 _log_lock = threading.Lock()
 
@@ -62,10 +68,21 @@ def build():
     return True
 
 
+def current_address():
+    """The address the settings allow right now — asked from updown itself (one source of truth)."""
+    cmd = ADDRESS_CMD if ADDRESS_CMD else [BINARY, "--config", CONF, "--address"]
+    r = subprocess.run(cmd, shell=bool(ADDRESS_CMD), cwd=PROJECT, capture_output=True, text=True)
+    if r.returncode == 0 and r.stdout.strip():
+        return r.stdout.strip().splitlines()[-1], ""
+    return None, (r.stderr.strip() or r.stdout.strip() or "no address").replace("[updown] ", "")
+
+
 class Agent:
     def __init__(self):
         self.child = None
         self.stopping = False
+        self.listening = None          # the address updown listens on (from its own output)
+        self.restart_reason = ""
 
     def stop(self, *_):
         """docker stop (SIGTERM) / Ctrl+C: pass it on to updown, then leave."""
@@ -73,14 +90,32 @@ class Agent:
         if self.child and self.child.poll() is None:
             self.child.send_signal(signal.SIGTERM)
 
+    def watch(self, child):
+        """While updown runs: the PC's network changed (or the hotspot is gone) → stop it; main() restarts it."""
+        while child.poll() is None and not self.stopping:
+            time.sleep(WATCH_SECONDS)
+            if child.poll() is not None or self.listening is None:
+                continue
+            addr, why = current_address()
+            if addr != self.listening:
+                self.restart_reason = (f"the network changed: {self.listening} → {addr}" if addr
+                                       else f"{self.listening} is gone — {why}")
+                child.send_signal(signal.SIGTERM)
+                return
+
     def run_once(self):
         """Start updown, relay its output, keep the link; returns updown's exit code."""
         set_link("")
+        self.listening, self.restart_reason = None, ""
         self.child = subprocess.Popen([BINARY, "--config", CONF], cwd=PROJECT, stdin=subprocess.DEVNULL,
                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        threading.Thread(target=self.watch, args=(self.child,), daemon=True).start()
         for line in self.child.stdout:
             line = line.rstrip("\n")
             print(line, flush=True)                                  # updown's own [updown] lines
+            m = LISTEN_RE.search(line)
+            if m:
+                self.listening = m.group(1)
             m = LINK_RE.search(line)
             if m:
                 set_link(m.group(1))
@@ -92,14 +127,31 @@ class Agent:
         signal.signal(signal.SIGINT, self.stop)
         say(f"starting — settings: {CONF}")
         delay = 1
+        built = False
+        waiting = ""
         while not self.stopping:
-            if not build():
-                time.sleep(min(delay, 60)); delay *= 2; continue
+            if not built:
+                if not build():
+                    time.sleep(min(delay, 60)); delay *= 2; continue
+                built = True
+            addr, why = current_address()
+            if not addr:                                        # BIND=hotspot and no hotspot: wait, say it once
+                if why != waiting:
+                    say(f"waiting — {why}")
+                    waiting = why
+                time.sleep(WATCH_SECONDS)
+                continue
+            waiting = ""
             started = time.time()
             rc = self.run_once()
             set_link("")
             if self.stopping:
                 break
+            if self.restart_reason:
+                say(self.restart_reason + " — starting updown again")
+                built = False                                    # a rebuild is quick and picks up source changes
+                continue
+            built = False
             if rc == 0:
                 say("updown stopped by itself (idle / after a transfer) — starting it again with a new link")
                 delay = 1
