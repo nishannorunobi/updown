@@ -29,7 +29,7 @@ func newTest(t *testing.T) (*Server, string, string) {
 	recv, share := t.TempDir(), t.TempDir()
 	s := New(Options{Product: "updown", Version: "0.1.0", ReceiveDir: recv, ShareDir: share,
 		StopMode: "enter", MaxBytes: 1 << 20, Token: tok, Page: web.Index,
-		HostKey: hostKey, HostPage: web.Host,
+		HostKey: hostKey, HostPage: web.Host, HostParts: web.Parts,
 		SendLink: "http://172.20.10.6:8070/send?t=" + tok, ReceiveLink: "http://172.20.10.6:8070/receive?t=" + tok,
 		SendQR: "<svg>send</svg>", ReceiveQR: "<svg>receive</svg>"})
 	return s, recv, share
@@ -203,8 +203,16 @@ func TestHostPage(t *testing.T) {
 		}
 	}
 	w := do(s, "GET", "/host?k="+hostKey, "172.28.0.1", nil)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "qr/send.svg") || !strings.Contains(w.Body.String(), "qr/receive.svg") {
+	if w.Code != http.StatusOK {
 		t.Fatalf("host page: %d", w.Code)
+	}
+	for _, part := range []string{"connection.html", "qr_codes.html", "transfer_log.html"} { // the blocks are part files (UPDOWN-44)
+		if !strings.Contains(w.Body.String(), `data-part="`+part+`"`) {
+			t.Errorf("host page has no placeholder for %s", part)
+		}
+	}
+	if q := do(s, "GET", "/host/part/qr_codes.html?k="+hostKey, "172.28.0.1", nil).Body.String(); !strings.Contains(q, "qr/send.svg") || !strings.Contains(q, "qr/receive.svg") {
+		t.Errorf("the QR part does not show both QR codes")
 	}
 	if m := regexp.MustCompile(`https?://`).FindString(w.Body.String()); m != "" {
 		t.Errorf("host page references an external URL (%s)", m)
@@ -241,5 +249,26 @@ func TestReceiveListNewestFirstNoHidden(t *testing.T) {
 	}
 	if i, j := strings.Index(body, "new.jpg"), strings.Index(body, "old.pdf"); i < 0 || j < 0 || i > j {
 		t.Errorf("not newest first: %s", body)
+	}
+}
+
+func TestHostParts(t *testing.T) {
+	s, _, _ := newTest(t)
+	for _, name := range []string{"connection.html", "qr_codes.html", "transfer_log.html"} {
+		w := do(s, "GET", "/host/part/"+name+"?k="+hostKey, "172.28.0.1", nil)
+		if w.Code != 200 || !strings.Contains(w.Header().Get("Content-Type"), "text/html") {
+			t.Fatalf("part %s: %d %s", name, w.Code, w.Header().Get("Content-Type"))
+		}
+		if m := regexp.MustCompile(`(?i)(src|href)=["']?(https?:)?//`).FindString(w.Body.String()); m != "" {
+			t.Errorf("part %s references an external URL (%s)", name, m)
+		}
+		if w := do(s, "GET", "/host/part/"+name, "172.28.0.1", nil); w.Code != 403 {
+			t.Errorf("part %s without the host key: %d, want 403", name, w.Code)
+		}
+	}
+	for _, bad := range []string{"nope.html", "..%2Fhost.html", "CONNECTION.html", "connection.js"} {
+		if w := do(s, "GET", "/host/part/"+bad+"?k="+hostKey, "172.28.0.1", nil); w.Code != 404 {
+			t.Errorf("part %q: %d, want 404", bad, w.Code)
+		}
 	}
 }

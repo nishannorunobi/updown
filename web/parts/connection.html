@@ -1,0 +1,171 @@
+<!-- connection.html — the "Phone connection" block: a PART of the host page (web/host.html loads it into
+     <div data-part="connection.html">). Approved mock v4.1 (UPDOWN-44). Reads the page's "updown:status" event:
+     green = the phone has a page open · amber = updown serves on the phone's network, no phone yet ·
+     red = no phone network (comes with the back end) · grey = updown not reachable / restarted.
+     Sets <body data-conn="ok|warn|bad|off"> so other parts (the QR codes) can react. -->
+<style>
+
+  /* the connection block (approved mock v4.1) */
+  .conn { border-width:2px; }
+  .conn.bad  { border-color:var(--bad);  }
+  .conn.warn { border-color:var(--warn); }
+  .conn.ok   { border-color:var(--ok);   }
+  .banner { display:flex; align-items:flex-start; gap:12px; padding:12px 14px; border-radius:10px; }
+  .bad  .banner { background:var(--bad-bg); }
+  .warn .banner { background:var(--warn-bg); }
+  .ok   .banner { background:var(--ok-bg); }
+  .dot { width:16px; height:16px; border-radius:50%; flex:none; margin-top:5px; }
+  .bad .dot { background:var(--bad); } .warn .dot { background:var(--warn); } .ok .dot { background:var(--ok); }
+  .ok .dot { box-shadow:0 0 0 4px color-mix(in srgb, var(--ok) 25%, transparent); }
+  .headline { font-size:1.25rem; font-weight:800; letter-spacing:.2px; }
+  .bad .headline { color:var(--bad); } .warn .headline { color:var(--warn); } .ok .headline { color:var(--ok); }
+  .detail { margin-top:2px; }
+  .facts { display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:8px 16px; margin:14px 2px 4px; }
+  .facts div span { display:block; font-size:.78rem; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; }
+  .facts div b { font-weight:600; }
+
+  .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .seg button { font:inherit; border:0; padding:7px 12px; background:transparent; color:var(--fg); cursor:pointer; }
+  .seg button + button { border-left:1px solid var(--line); }
+  .seg button.on { background:var(--accent); color:#fff; font-weight:600; }
+  .btn { font:inherit; padding:7px 12px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--fg); cursor:pointer; }
+  .btn:hover, .seg button:hover:not(.on) { border-color:var(--accent); }
+  .spacer { flex:1; }
+  .warnline { width:100%; font-size:.85rem; color:var(--warn); }
+
+  details { margin-top:12px; }
+  summary { cursor:pointer; font-weight:600; }
+  .ways { display:grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap:10px; margin-top:10px; }
+  .way { border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .way.used { border-color:var(--ok); }
+  .way h3 { font-size:.95rem; margin:0 0 6px; display:flex; justify-content:space-between; }
+  .way.used h3::after { content:"✓ in use"; color:var(--ok); font-size:.8rem; }
+  .way.off { opacity:.55; }
+  .way ol { margin:0; padding-left:18px; font-size:.88rem; }
+
+  .clog { font:12.5px/1.5 ui-monospace, monospace; max-height:150px; overflow:auto; margin:12px 0 0; padding:0; list-style:none; }
+  .clog li { padding:3px 0; border-top:1px solid var(--line); }
+  .clog li:first-child { border-top:0; }
+  .clog time { color:var(--muted); margin-right:8px; }
+  .clog .ok { color:var(--ok); } .clog .bad { color:var(--bad); } .clog .warn { color:var(--warn); }
+
+  .conn.off  { border-color:var(--line); }
+  .off  .banner { background:var(--off-bg); }
+  .off .dot { background:var(--muted); } .off .headline { color:var(--muted); }
+  .btn:disabled, .seg button:disabled { opacity:.55; cursor:not-allowed; }
+  .later { font-size:.8rem; color:var(--muted); width:100%; }
+  /* narrow window / phone: everything stacks, one view after another */
+  @media (max-width: 640px) {
+    .headline { font-size:1.1rem; }
+    .facts { grid-template-columns: minmax(0, 1fr); }
+    .controls { flex-direction:column; align-items:stretch; }
+    .controls .spacer { display:none; }
+    .seg { display:flex; } .seg button { flex:1; }
+    .btn { width:100%; }
+    .ways { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>
+<section class="conn off" id="conn">
+  <div class="banner">
+    <div class="dot"></div>
+    <div>
+      <div class="headline" id="c-head">Checking…</div>
+      <div class="detail" id="c-detail"></div>
+    </div>
+  </div>
+
+  <div class="facts" id="c-facts"></div>
+
+  <div class="controls">
+    <span class="muted">Network:</span>
+    <div class="seg" id="c-mode">
+      <button class="on" data-m="hotspot" disabled title="comes with the back end">📶 Hotspot only</button>
+      <button data-m="auto" disabled title="comes with the back end">🌐 Any network</button>
+    </div>
+    <span class="spacer"></span>
+    <button class="btn" disabled title="comes with the back end">⟳ Check now</button>
+    <button class="btn" disabled title="comes with the back end">🔑 New link</button>
+    <div class="later">The network switch and the buttons come with the back end — today the network is set in updown's settings (BIND).</div>
+  </div>
+
+  <details id="c-howto">
+    <summary>How to connect the phone</summary>
+    <div class="ways">
+      <div class="way">
+        <h3>📶 Hotspot over Wi-Fi</h3>
+        <ol><li>iPhone: Settings › Personal Hotspot › on</li><li>this PC: Wi-Fi › join the iPhone's network</li><li>this block turns green when the phone opens a page</li></ol>
+      </div>
+      <div class="way">
+        <h3>🔌 Hotspot over USB</h3>
+        <ol><li>iPhone: Personal Hotspot › on</li><li>plug the cable in, tap "Trust" on the phone</li><li>this PC uses it by itself (no photo import needed)</li></ol>
+      </div>
+      <div class="way">
+        <h3>🏠 Same Wi-Fi</h3>
+        <ol><li>only when updown uses any network (BIND=auto)</li><li>PC and phone on the same router</li><li>only on your own Wi-Fi</li></ol>
+      </div>
+    </div>
+    <p class="muted">Not possible: Bluetooth file push (iPhones accept files over Bluetooth only via AirDrop). Joining a Wi-Fi or switching on the hotspot is done on the PC / the phone — updown cannot do it for you.</p>
+  </details>
+
+  <h2 style="margin-top:14px">Connection log</h2>
+  <ul class="clog" id="c-log"></ul>
+</section>
+
+<script>
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  let since = null, lastState = "";
+  const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+  const hostOf = link => { try { return new URL(link).hostname; } catch (_) { return ""; } };
+  const kindOf = ip => /^172\.20\.10\./.test(ip) ? "📶 iPhone hotspot"
+                     : /^192\.168\.43\./.test(ip) ? "📶 Android hotspot" : "🌐 a Wi-Fi / LAN (not the phone's hotspot)";
+  const time = d => d.toLocaleTimeString();
+  function log(cls, text, when) {
+    const li = document.createElement("li");
+    li.innerHTML = `<time>${time(when || new Date())}</time><span class="${cls}">${esc(text)}</span>`;
+    $("c-log").prepend(li);
+  }
+  function show(state, head, detail, facts) {
+    $("conn").className = "conn " + state;
+    document.body.dataset.conn = state;
+    $("c-head").textContent = head;
+    $("c-detail").textContent = detail;
+    $("c-facts").innerHTML = facts.map(([a, b]) => `<div><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join("");
+    $("c-howto").open = state === "bad" || state === "off";
+    if (state !== lastState) { lastState = state; }
+  }
+  document.addEventListener("updown:status", e => {
+    const d = e.detail;
+    if (d.error) {
+      since = null;
+      const restarted = d.error === "key";
+      show("off", restarted ? "updown restarted — this link is old" : "updown is not reachable",
+           restarted ? "Open the new link: bash projectspace/updown/status.sh (a new link comes after an idle stop or a network change)."
+                     : "This page keeps trying by itself. updown may be restarting, or this PC left the phone's network.",
+           [["Last check", "just now"]]);
+      return;
+    }
+    const s = d.status, pc = hostOf(s.send);
+    for (const l of s.log) {                                   // the connection-related lines of updown's log
+      if (/phone connected|listening on|stopped|refused .*(session|second|another)/i.test(l.line))
+        log(/refused|stopped/i.test(l.line) ? "bad" : (/connected/i.test(l.line) ? "ok" : "warn"), l.line, new Date(l.time));
+    }
+    if (s.phone) {
+      if (!since) since = new Date();
+      show("ok", "Connected — phone at " + s.phone, "Ready to transfer: the phone has an updown page open.",
+           [["Connected by", kindOf(pc)], ["Phone", s.phone], ["This PC", pc], ["Connected since", time(since)]]);
+    } else {
+      since = null;
+      const hotspot = /^172\.20\.10\.|^192\.168\.43\./.test(pc);
+      // the switch shows the mode in use: serving on a non-hotspot address can only be "Any network"
+      document.querySelectorAll("#c-mode button").forEach(b => b.classList.toggle("on", (b.dataset.m === "auto") === !hotspot));
+      show("warn", hotspot ? "Phone network found" : "Serving on a Wi-Fi / LAN — not your phone's hotspot",
+           hotspot ? "updown serves on " + pc + " — scan a QR code below with the phone's camera."
+                   : "updown serves on " + pc + " (any network). Files are not private on a Wi-Fi that is not yours — use the phone's hotspot for personal files.",
+           [["Connected by", kindOf(pc)], ["This PC", pc], ["Phone", "not connected yet"], ["Last check", "just now"]]);
+    }
+  });
+})();
+</script>

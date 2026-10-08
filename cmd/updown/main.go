@@ -123,7 +123,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		ReceiveDir: cfg.ReceiveDir, ShareDir: cfg.ShareDir, ShareFiles: shareFiles,
 		StopMode: cfg.StopMode, MaxBytes: int64(cfg.MaxFileGB) << 30,
 		Token: token, Page: web.Index,
-		HostKey: hostKey, HostPage: web.Host,
+		HostKey: hostKey, HostPage: web.Host, HostParts: web.Parts,
 		SendLink: sendLink, ReceiveLink: receiveLink,
 		SendQR: qr.SVG(sendQR, 4), ReceiveQR: qr.SVG(receiveQR, 4),
 		Logf: func(f string, a ...any) { say(f, a...) },

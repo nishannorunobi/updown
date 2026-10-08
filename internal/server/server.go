@@ -13,11 +13,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"mime"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -42,6 +44,7 @@ type Options struct {
 	// The PC's host page (contract §4): its own key, never shown to the phone.
 	HostKey     string
 	HostPage    []byte
+	HostParts   fs.FS  // the host page's part files (parts/NAME.html), served at /host/part/NAME.html
 	SendLink    string // QR "Send files"    → the phone's upload screen (/send)
 	ReceiveLink string // QR "Receive files" → the phone's download screen (/receive)
 	SendQR      string // the two QR codes as SVG
@@ -113,6 +116,7 @@ func New(o Options) *Server {
 	s.hostMux.HandleFunc("GET /host/qr/send.svg", s.hostQR(func() string { return s.o.SendQR }))
 	s.hostMux.HandleFunc("GET /host/qr/receive.svg", s.hostQR(func() string { return s.o.ReceiveQR }))
 	s.hostMux.HandleFunc("GET /host/api/status", s.hostStatus)
+	s.hostMux.HandleFunc("GET /host/part/{name}", s.hostPart)
 	s.hostMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, http.StatusNotFound, "not found") })
 	return s
 }
@@ -419,6 +423,24 @@ func (s *Server) hostPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "default-src 'self' 'unsafe-inline'")
 	w.Write(s.o.HostPage)
 }
+
+// hostPart serves one part file of the host page (parts/NAME.html) — only plain names, only what is embedded.
+func (s *Server) hostPart(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if s.o.HostParts == nil || !partName.MatchString(name) {
+		fail(w, http.StatusNotFound, "not found")
+		return
+	}
+	b, err := fs.ReadFile(s.o.HostParts, "parts/"+name)
+	if err != nil {
+		fail(w, http.StatusNotFound, "not found")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(b)
+}
+
+var partName = regexp.MustCompile(`^[a-z0-9_]+\.html$`)
 
 func (s *Server) hostQR(svg func() string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

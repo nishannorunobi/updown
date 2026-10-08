@@ -1,0 +1,33 @@
+<!-- transfer_log.html — updown's event log: a PART of the host page (web/host.html loads it into
+     <div data-part="transfer_log.html">). Approved mock v4.2 (UPDOWN-44). Every log line from the page's
+     "updown:status" event, newest first: uploads, downloads, refused requests, stops. -->
+<style>
+  .tlog ul { font:12.5px/1.5 ui-monospace, monospace; max-height:40vh; overflow:auto; margin:0; padding:0; list-style:none; }
+  .tlog li { padding:3px 0; border-top:1px solid var(--line); overflow-wrap:anywhere; }
+  .tlog li:first-child { border-top:0; }
+  .tlog time { color:var(--muted); margin-right:8px; }
+  .tlog .ok { color:var(--ok); } .tlog .bad { color:var(--bad); }
+</style>
+<section class="tlog">
+  <h2>Transfer log</h2>
+  <ul id="t-log"></ul>
+</section>
+<script>
+(() => {
+  "use strict";
+  const ul = document.getElementById("t-log");
+  document.addEventListener("updown:status", e => {
+    const s = e.detail.status;
+    if (!s) return;
+    for (const l of s.log) {
+      const li = document.createElement("li"), t = document.createElement("time"), sp = document.createElement("span");
+      t.textContent = new Date(l.time).toLocaleTimeString();
+      sp.textContent = l.line;
+      if (/refused|failed|stopped/i.test(l.line)) sp.className = "bad";
+      else if (/finished|connected/i.test(l.line)) sp.className = "ok";
+      li.append(t, sp);
+      ul.prepend(li);
+    }
+  });
+})();
+</script>

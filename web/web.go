@@ -2,7 +2,7 @@
 // separate files and never loads anything from the internet (docs/contract.md §7).
 package web
 
-import _ "embed"
+import "embed"
 
 // Index is the phone page, served at GET /.
 //
@@ -13,3 +13,9 @@ var Index []byte
 //
 //go:embed host.html
 var Host []byte
+
+// Parts are the host page's blocks (connection, QR codes, transfer log …), one file each, loaded into the
+// page's <div data-part="NAME.html"> through GET /host/part/NAME.html. A new block = a new file here.
+//
+//go:embed parts/*.html
+var Parts embed.FS

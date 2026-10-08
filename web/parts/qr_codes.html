@@ -1,0 +1,42 @@
+<!-- qr_codes.html — the "Send files" / "Receive files" QR codes: a PART of the host page (web/host.html loads it into
+     <div data-part="qr_codes.html">). Approved mock v4.2 (UPDOWN-44). The images come from /host/qr/*.svg; they are
+     reloaded when updown hands out a new link, and fade while <body data-conn="bad|off"> (set by the connection part). -->
+<style>
+  .codes { display:grid; gap:16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 640px) { .codes { grid-template-columns: minmax(0, 1fr); } }     /* phone: one under the other */
+  .code h2 { font-size:1.15rem; margin:0; }
+  .code p { margin:4px 0 0; }
+  .qr { background:#fff; border-radius:10px; padding:8px; margin:14px 0; }
+  .qr img { display:block; width:100%; height:auto; image-rendering:pixelated; }
+  body[data-conn="bad"] .codes .qr, body[data-conn="off"] .codes .qr { opacity:.25; }
+  body[data-conn="bad"] .codes .code p.muted::after, body[data-conn="off"] .codes .code p.muted::after
+    { content:" — waiting for the phone's network"; color:var(--bad); }
+</style>
+<div class="codes">
+  <section class="code">
+    <h2>Send files</h2>
+    <p class="muted">Phone → this PC: opens the upload screen on the phone.</p>
+    <div class="qr"><img id="qr-send" alt="QR code: send files to this PC"></div>
+  </section>
+  <section class="code">
+    <h2>Receive files</h2>
+    <p class="muted">This PC → phone: opens this PC's Downloads on the phone to pick files.</p>
+    <div class="qr"><img id="qr-receive" alt="QR code: receive files from this PC"></div>
+  </section>
+</div>
+<script>
+(() => {
+  "use strict";
+  let link = "";
+  const load = () => {
+    const v = "&v=" + encodeURIComponent(link);                      // a new link → new images
+    document.getElementById("qr-send").src = "/host/qr/send.svg" + window.updown.k + v;
+    document.getElementById("qr-receive").src = "/host/qr/receive.svg" + window.updown.k + v;
+  };
+  load();
+  document.addEventListener("updown:status", e => {
+    const s = e.detail.status;
+    if (s && s.send !== link) { link = s.send; load(); }
+  });
+})();
+</script>
