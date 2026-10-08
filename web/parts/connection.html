@@ -1,7 +1,7 @@
 <!-- connection.html — the "Phone connection" block: a PART of the host page (web/host.html loads it into
      <div data-part="connection.html">). Approved mock v4.1 (UPDOWN-44). Reads the page's "updown:status" event:
      green = the phone has a page open · amber = updown serves on the phone's network, no phone yet ·
-     red = no phone network (comes with the back end) · grey = updown not reachable / restarted.
+     red = no phone network · grey = updown not reachable (restarting). Data: status.connection + phone_agent ([2.6]).
      Sets <body data-conn="ok|warn|bad|off"> so other parts (the QR codes) can react. -->
 <style>
 
@@ -86,7 +86,7 @@
     <span class="spacer"></span>
     <button class="btn" disabled title="comes with the back end">⟳ Check now</button>
     <button class="btn" disabled title="comes with the back end">🔑 New link</button>
-    <div class="later">The network switch and the buttons come with the back end — today the network is set in updown's settings (BIND).</div>
+    <div class="later">The switch shows the mode in use; changing it and the buttons come in a later story — today the network is set in updown's settings (BIND).</div>
   </div>
 
   <details id="c-howto">
@@ -116,55 +116,59 @@
 (() => {
   "use strict";
   const $ = id => document.getElementById(id);
-  let since = null, lastState = "";
+  let since = null;
   const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
   const hostOf = link => { try { return new URL(link).hostname; } catch (_) { return ""; } };
-  const kindOf = ip => /^172\.20\.10\./.test(ip) ? "📶 iPhone hotspot"
-                     : /^192\.168\.43\./.test(ip) ? "📶 Android hotspot" : "🌐 a Wi-Fi / LAN (not the phone's hotspot)";
+  const VIA = { wifi: "Wi-Fi", usb: "USB", bluetooth: "Bluetooth", lan: "a cable / LAN" };
+  const WAY = { wifi: 0, usb: 1, lan: 2 };                         // which "How to connect" card is in use
   const time = d => d.toLocaleTimeString();
   function log(cls, text, when) {
     const li = document.createElement("li");
     li.innerHTML = `<time>${time(when || new Date())}</time><span class="${cls}">${esc(text)}</span>`;
     $("c-log").prepend(li);
   }
-  function show(state, head, detail, facts) {
+  function show(state, head, detail, facts, conn) {
     $("conn").className = "conn " + state;
     document.body.dataset.conn = state;
     $("c-head").textContent = head;
     $("c-detail").textContent = detail;
     $("c-facts").innerHTML = facts.map(([a, b]) => `<div><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join("");
     $("c-howto").open = state === "bad" || state === "off";
-    if (state !== lastState) { lastState = state; }
+    const used = conn && conn.state !== "none" ? WAY[conn.via] : -1;
+    document.querySelectorAll("#c-howto .way").forEach((w, i) => w.classList.toggle("used", i === used));
+    if (conn && conn.state !== "none")                        // the switch shows the mode in use
+      document.querySelectorAll("#c-mode button").forEach(b => b.classList.toggle("on", (b.dataset.m === "auto") === (conn.state === "lan")));
   }
   document.addEventListener("updown:status", e => {
     const d = e.detail;
     if (d.error) {
       since = null;
-      const restarted = d.error === "key";
-      show("off", restarted ? "updown restarted — this link is old" : "updown is not reachable",
-           restarted ? "Open the new link: bash projectspace/updown/status.sh (a new link comes after an idle stop or a network change)."
-                     : "This page keeps trying by itself. updown may be restarting, or this PC left the phone's network.",
+      show("off", "updown is not reachable", "This page keeps trying by itself — updown may be restarting (a few seconds).",
            [["Last check", "just now"]]);
       return;
     }
-    const s = d.status, pc = hostOf(s.send);
+    const s = d.status, c = s.connection || { state: s.send ? "hotspot" : "none", via: "", pc: hostOf(s.send) };
     for (const l of s.log) {                                   // the connection-related lines of updown's log
-      if (/phone connected|listening on|stopped|refused .*(session|second|another)/i.test(l.line))
-        log(/refused|stopped/i.test(l.line) ? "bad" : (/connected/i.test(l.line) ? "ok" : "warn"), l.line, new Date(l.time));
+      if (/phone connected|listening on|no phone network|stopped|refused .*(session|second|another)/i.test(l.line))
+        log(/refused|stopped|no phone network/i.test(l.line) ? "bad" : (/connected/i.test(l.line) ? "ok" : "warn"), l.line, new Date(l.time));
     }
-    if (s.phone) {
+    const how = c.state === "hotspot" ? "📶 phone hotspot over " + (VIA[c.via] || c.via)
+              : "🌐 " + (VIA[c.via] || "a network") + " — not your phone's hotspot";
+    if (c.state === "none") {
+      since = null;
+      show("bad", "No phone found", "This PC is not on your phone's hotspot — switch on the iPhone's Personal Hotspot and join it " +
+           "(Wi-Fi, USB or Bluetooth). The QR codes appear as soon as it is found.",            // updown's exact reason: the log below
+           [["This PC", "not on a phone network"], ["Phone", "—"], ["Mode", "📶 Hotspot only"], ["Last check", "just now"]], c);
+    } else if (s.phone) {
       if (!since) since = new Date();
-      show("ok", "Connected — phone at " + s.phone, "Ready to transfer: the phone has an updown page open.",
-           [["Connected by", kindOf(pc)], ["Phone", s.phone], ["This PC", pc], ["Connected since", time(since)]]);
+      show("ok", "Connected — " + (s.phone_agent || "phone"), "Ready to transfer: the phone has an updown page open.",
+           [["Connected by", how], ["Phone", (s.phone_agent ? s.phone_agent + " · " : "") + s.phone], ["This PC", c.pc], ["Connected since", time(since)]], c);
     } else {
       since = null;
-      const hotspot = /^172\.20\.10\.|^192\.168\.43\./.test(pc);
-      // the switch shows the mode in use: serving on a non-hotspot address can only be "Any network"
-      document.querySelectorAll("#c-mode button").forEach(b => b.classList.toggle("on", (b.dataset.m === "auto") === !hotspot));
-      show("warn", hotspot ? "Phone network found" : "Serving on a Wi-Fi / LAN — not your phone's hotspot",
-           hotspot ? "updown serves on " + pc + " — scan a QR code below with the phone's camera."
-                   : "updown serves on " + pc + " (any network). Files are not private on a Wi-Fi that is not yours — use the phone's hotspot for personal files.",
-           [["Connected by", kindOf(pc)], ["This PC", pc], ["Phone", "not connected yet"], ["Last check", "just now"]]);
+      show("warn", c.state === "hotspot" ? "Phone network found" : "Serving on a Wi-Fi / LAN — not your phone's hotspot",
+           c.state === "hotspot" ? "updown serves on " + c.pc + " — scan a QR code below with the phone's camera."
+                                 : "updown serves on " + c.pc + " (any network). Files are not private on a Wi-Fi that is not yours — use the phone's hotspot for personal files.",
+           [["Connected by", how], ["This PC", c.pc + (c.iface ? " (" + c.iface + ")" : "")], ["Phone", "not connected yet"], ["Last check", "just now"]], c);
     }
   });
 })();

@@ -1,7 +1,7 @@
 # updown
 
 ```
-bash start.sh      # starts updown and prints the link — open it in this PC's browser, scan a QR code with the phone
+bash start.sh      # starts updown — then open http://localhost:8070 on this PC (always the same), scan a QR code with the phone
 bash status.sh     # running? + the current link
 bash stop.sh
 ```
@@ -101,6 +101,9 @@ Open it in this PC's browser: **two QR codes** and the live log.
   hotspot** (USB or Wi-Fi) — never on a foreign Wi-Fi. On another network the agent waits ("waiting — no
   phone hotspot …") and starts updown within seconds of this PC joining the hotspot; when the address
   changes it restarts updown with a new link. `BIND=auto` (any network) is in `updown-agent/updown.conf`.
-- After 15 idle minutes updown stops and the agent starts it again with a **new link** — the current one:
-  `bash status.sh`. A crash is restarted the same way. Settings: `updown-agent/updown.conf`.
+- **The page is always http://localhost:8070** (HOST_PORT) — only this PC can open it, the address never
+  changes. updown itself opens the phone's door on the hotspot when it appears, moves it when the address
+  changes and closes it when the hotspot is gone (the page turns red); each new door = new QR codes.
+- After 15 idle minutes updown stops and the agent starts it again (same page). A crash is restarted the
+  same way. Settings: `updown-agent/updown.conf`.
 

@@ -23,7 +23,7 @@
       const li = document.createElement("li"), t = document.createElement("time"), sp = document.createElement("span");
       t.textContent = new Date(l.time).toLocaleTimeString();
       sp.textContent = l.line;
-      if (/refused|failed|stopped/i.test(l.line)) sp.className = "bad";
+      if (/refused|failed|stopped|no phone network|cannot/i.test(l.line)) sp.className = "bad";
       else if (/finished|connected/i.test(l.line)) sp.className = "ok";
       li.append(t, sp);
       ul.prepend(li);

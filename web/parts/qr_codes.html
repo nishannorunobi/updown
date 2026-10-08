@@ -8,35 +8,39 @@
   .code p { margin:4px 0 0; }
   .qr { background:#fff; border-radius:10px; padding:8px; margin:14px 0; }
   .qr img { display:block; width:100%; height:auto; image-rendering:pixelated; }
+  .qr .none { display:none; aspect-ratio:1; place-items:center; text-align:center; color:#888; font-size:.9rem; padding:12px; }
+  .codes.closed .qr img { display:none; }                 /* no phone door: no QR codes, a calm box instead */
+  .codes.closed .qr .none { display:grid; }
   body[data-conn="bad"] .codes .qr, body[data-conn="off"] .codes .qr { opacity:.25; }
   body[data-conn="bad"] .codes .code p.muted::after, body[data-conn="off"] .codes .code p.muted::after
     { content:" — waiting for the phone's network"; color:var(--bad); }
 </style>
-<div class="codes">
+<div class="codes closed" id="codes">
   <section class="code">
     <h2>Send files</h2>
     <p class="muted">Phone → this PC: opens the upload screen on the phone.</p>
-    <div class="qr"><img id="qr-send" alt="QR code: send files to this PC"></div>
+    <div class="qr"><img id="qr-send" alt="QR code: send files to this PC"><div class="none">The QR code appears as soon as the phone's network is found.</div></div>
   </section>
   <section class="code">
     <h2>Receive files</h2>
     <p class="muted">This PC → phone: opens this PC's Downloads on the phone to pick files.</p>
-    <div class="qr"><img id="qr-receive" alt="QR code: receive files from this PC"></div>
+    <div class="qr"><img id="qr-receive" alt="QR code: receive files from this PC"><div class="none">The QR code appears as soon as the phone's network is found.</div></div>
   </section>
 </div>
 <script>
 (() => {
   "use strict";
-  let link = "";
+  let link = null;
   const load = () => {
+    document.getElementById("codes").classList.toggle("closed", !link);
+    if (!link) return;
     const v = "&v=" + encodeURIComponent(link);                      // a new link → new images
     document.getElementById("qr-send").src = "/host/qr/send.svg" + window.updown.k + v;
     document.getElementById("qr-receive").src = "/host/qr/receive.svg" + window.updown.k + v;
   };
-  load();
   document.addEventListener("updown:status", e => {
     const s = e.detail.status;
-    if (s && s.send !== link) { link = s.send; load(); }
+    if (s && (s.send || null) !== link) { link = s.send || null; load(); }
   });
 })();
 </script>

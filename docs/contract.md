@@ -46,6 +46,7 @@ Same `KEY=VALUE` format. Every key is optional; an empty or missing key takes th
 | `SHARE_DIR` | the OS Downloads folder¹ | the folder whose files the phone sees on the Receive screen (not recursive) |
 | `STOP_MODE` | `enter` | `enter` (Enter in the terminal) · `after-transfer` (after the first completed upload or download) · `idle` (no request for `IDLE_MINUTES`) |
 | `IDLE_MINUTES` | `15` | used by `STOP_MODE=idle`; also a hard stop for the other modes when nothing happens |
+| `HOST_PORT` | `8070` | the PC's page at `http://localhost:HOST_PORT` — loopback only, no key, the link never changes ([2.6]) |
 | `PORT` | `0` | `0` = first free port from 8070 to 8079; otherwise that port |
 | `BIND` | `auto` | `auto` = pick the phone-reachable address (order: phone hotspot 172.20.10.x / USB tether, then Wi-Fi, then other private LAN) · `hotspot` = ONLY the phone hotspot / USB tether, never another network (none → exit 1 with the reason) · or one IPv4 address |
 | `ADVERTISE` | empty | the address put in the QR link when it differs from `BIND` (the dev container binds 0.0.0.0 and advertises the host's hotspot address) |
@@ -81,15 +82,16 @@ The QR code is **never drawn in the console** (owner, 2026-09-30). The console p
 lines starting with `[updown]`:
 
 1. `RELEASE`, receive folder, offered files, stop mode; the listen address.
-2. `open this page on this PC to show the QR codes: http://<address>:<port>/host?k=<host key>`
+2. `open this page on this PC to show the QR codes: http://localhost:<HOST_PORT>` — always the same
 3. One line per event: phone connected, upload started/finished (name, size, SHA-256,
    seconds), download finished, refused request (reason), stop (reason).
 
 The phone link (with its token) is never printed to the console or a log.
 
-**Host page** — for this PC's browser, protected by its own key (`?k=`, 32 random bytes per
-start, different from the phone token; the phone token cannot open it, and it never takes
-the phone's session or counts as activity):
+**Host page** — for this PC's browser, on its OWN listener **http://localhost:HOST_PORT** ([2.6], UPDOWN-52):
+loopback only (no other device can reach it), so no key; the Host header must be `localhost` / `127.0.0.1` /
+`::1` (no other web site can read it). The page and its parts (`/host/part/NAME.html`) never take the
+phone's session or count as activity. The phone's door never serves `/host` (403).
 
 | Method + path | Does |
 |---|---|

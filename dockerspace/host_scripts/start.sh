@@ -46,7 +46,7 @@ if link="$(docker exec "$C" python3 /updown/updown-agent/agent.py link 90 2>/dev
     echo -e "\033[32m[  OK  ]\033[0m $C running — updown is ready"
     echo "         open this link in this PC's browser for the QR codes (send / receive files):"
     echo -e "         \033[1m$link\033[0m"
-    echo "         a new link comes after 15 idle minutes — the current one: bash status.sh"
+    echo "         this link never changes — bookmark it; the QR codes on it follow the phone's network"
     exit 0
 fi
 if docker ps --format '{{.Names}}' | grep -qx "$C"; then
