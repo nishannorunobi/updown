@@ -40,6 +40,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	confPath := fs.String("config", "", "settings file (default: updown.conf next to release.conf)")
 	check := fs.Bool("check", false, "offline self-test: validate the release and settings, then exit")
 	version := fs.Bool("version", false, "print the release and exit")
+	address := fs.Bool("address", false, "print the address the settings would listen on, then exit (1 = none, with the reason)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -74,6 +75,14 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	if *check {
 		return selfCheck(rel, cfg, stdout, stderr)
+	}
+	if *address { // updown-agent asks this every few seconds to follow the PC's network
+		listenIP, _, _, err := addresses(cfg)
+		if err != nil {
+			return fail("%v", err)
+		}
+		fmt.Fprintln(stdout, listenIP)
+		return 0
 	}
 
 	// Files named on the command line must exist.
@@ -200,11 +209,11 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 func addresses(cfg config.Config) (listenIP, adIP, how string, err error) {
 	cands := netaddr.Candidates()
 	switch {
-	case cfg.Bind == "auto":
-		if len(cands) == 0 {
-			return "", "", "", errors.New("no phone-reachable network — connect this PC to the phone's hotspot (USB or Wi-Fi) or to the same Wi-Fi, or set BIND")
+	case cfg.Bind == "auto" || cfg.Bind == "hotspot":
+		c, err := netaddr.Pick(cfg.Bind, cands)
+		if err != nil {
+			return "", "", "", err
 		}
-		c := cands[0]
 		listenIP, adIP, how = c.IP.String(), c.IP.String(), c.Kind.String()+" on "+c.Iface
 	default:
 		listenIP, adIP, how = cfg.Bind, cfg.Bind, "BIND"

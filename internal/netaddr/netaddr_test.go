@@ -29,3 +29,33 @@ func TestClassify(t *testing.T) {
 		}
 	}
 }
+
+func TestPick(t *testing.T) {
+	hot := Candidate{Iface: "wlo1", IP: net.ParseIP("172.20.10.3").To4(), Kind: Hotspot}
+	wifi := Candidate{Iface: "wlo1", IP: net.ParseIP("172.31.43.152").To4(), Kind: WiFi}
+	lan := Candidate{Iface: "eth0", IP: net.ParseIP("192.168.1.5").To4(), Kind: LAN}
+	cases := []struct {
+		bind  string
+		cands []Candidate
+		want  string // "" = error
+	}{
+		{"auto", []Candidate{hot, wifi}, "172.20.10.3"},
+		{"auto", []Candidate{wifi, lan}, "172.31.43.152"},
+		{"hotspot", []Candidate{hot, wifi}, "172.20.10.3"},
+		{"hotspot", []Candidate{wifi, lan}, ""}, // a foreign Wi-Fi is never used
+		{"hotspot", nil, ""},
+		{"auto", nil, ""},
+	}
+	for _, c := range cases {
+		got, err := Pick(c.bind, c.cands)
+		if c.want == "" {
+			if err == nil {
+				t.Errorf("Pick(%s, %v) = %v, want an error", c.bind, c.cands, got.IP)
+			}
+			continue
+		}
+		if err != nil || got.IP.String() != c.want {
+			t.Errorf("Pick(%s, …) = %v, %v; want %s", c.bind, got.IP, err, c.want)
+		}
+	}
+}

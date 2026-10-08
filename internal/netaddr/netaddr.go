@@ -1,9 +1,11 @@
-// Package netaddr finds the address a phone can reach this PC on (docs/contract.md §2
-// BIND=auto): the phone's hotspot / USB tether first, then Wi-Fi, then any other private
-// LAN. Container and virtual bridges are never used.
+// Package netaddr finds the address a phone can reach this PC on (docs/contract.md §2):
+// BIND=auto — the phone's hotspot / USB tether first, then Wi-Fi, then any other private LAN;
+// BIND=hotspot — ONLY the phone's hotspot / USB tether (never a foreign Wi-Fi or LAN).
+// Container and virtual bridges are never used.
 package netaddr
 
 import (
+	"errors"
 	"net"
 	"sort"
 	"strings"
@@ -80,4 +82,18 @@ func Candidates() []Candidate {
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Kind < out[j].Kind })
 	return out
+}
+
+// Pick chooses the address for BIND=auto or BIND=hotspot from the candidates (best first).
+// hotspot never falls back to Wi-Fi or a LAN: no phone hotspot → an error with the reason.
+func Pick(bind string, cands []Candidate) (Candidate, error) {
+	for _, c := range cands {
+		if bind == "auto" || c.Kind == Hotspot {
+			return c, nil
+		}
+	}
+	if bind == "hotspot" {
+		return Candidate{}, errors.New("no phone hotspot — connect this PC to the phone's hotspot (USB or Wi-Fi); BIND=hotspot never uses another network")
+	}
+	return Candidate{}, errors.New("no phone-reachable network — connect this PC to the phone's hotspot (USB or Wi-Fi) or to the same Wi-Fi, or set BIND")
 }

@@ -47,7 +47,7 @@ Same `KEY=VALUE` format. Every key is optional; an empty or missing key takes th
 | `STOP_MODE` | `enter` | `enter` (Enter in the terminal) · `after-transfer` (after the first completed upload or download) · `idle` (no request for `IDLE_MINUTES`) |
 | `IDLE_MINUTES` | `15` | used by `STOP_MODE=idle`; also a hard stop for the other modes when nothing happens |
 | `PORT` | `0` | `0` = first free port from 8070 to 8079; otherwise that port |
-| `BIND` | `auto` | `auto` = pick the phone-reachable address (order: phone hotspot 172.20.10.x / USB tether, then Wi-Fi, then other private LAN); or one IPv4 address |
+| `BIND` | `auto` | `auto` = pick the phone-reachable address (order: phone hotspot 172.20.10.x / USB tether, then Wi-Fi, then other private LAN) · `hotspot` = ONLY the phone hotspot / USB tether, never another network (none → exit 1 with the reason) · or one IPv4 address |
 | `ADVERTISE` | empty | the address put in the QR link when it differs from `BIND` (the dev container binds 0.0.0.0 and advertises the host's hotspot address) |
 | `MAX_FILE_GB` | `10` | largest single upload |
 
@@ -61,11 +61,14 @@ part files of running uploads are never listed.
 ## 3. Command line
 
 ```
-start.sh [--config FILE] [--check] [--version] [FILE ...]
+start.sh [--config FILE] [--check] [--version] [--address] [FILE ...]
 ```
 
 - `FILE ...` — extra files offered to the phone (listed before `SHARE_DIR`'s files).
 - `--version` — prints `RELEASE` and exits 0.
+- `--address` — prints the address the settings would listen on (BIND) and exits 0; none (e.g.
+  `BIND=hotspot` and no hotspot) → the reason on one line, exit 1. Used by updown-agent to follow the
+  PC's network.
 - `--check` — the release self-test used by `test_release.sh`: prints
   `<RELEASE> (version <VERSION>)`, validates `release.conf` and `updown.conf`, confirms it can
   listen on 127.0.0.1, exits 0; anything wrong → the reason on one line, exit 1. Needs no

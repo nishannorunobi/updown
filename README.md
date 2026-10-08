@@ -97,8 +97,10 @@ Open it in this PC's browser: **two QR codes** and the live log.
 - **Send files** QR → the phone's upload screen; files land in this PC's **Downloads**.
 - **Receive files** QR → the phone's download screen: this PC's **Downloads** files, newest
   first — tap one to save it on the phone.
-- The container uses this PC's network: updown picks the phone-reachable address itself (phone hotspot /
-  USB tether first, then Wi-Fi, then LAN) and listens on 8070–8079.
+- The container uses this PC's network. By default (`BIND=hotspot`) updown serves **only on your phone's
+  hotspot** (USB or Wi-Fi) — never on a foreign Wi-Fi. On another network the agent waits ("waiting — no
+  phone hotspot …") and starts updown within seconds of this PC joining the hotspot; when the address
+  changes it restarts updown with a new link. `BIND=auto` (any network) is in `updown-agent/updown.conf`.
 - After 15 idle minutes updown stops and the agent starts it again with a **new link** — the current one:
   `bash status.sh`. A crash is restarted the same way. Settings: `updown-agent/updown.conf`.
 

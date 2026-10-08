@@ -29,7 +29,7 @@ type Config struct {
 	StopMode    string // STOP_MODE
 	IdleMinutes int    // IDLE_MINUTES
 	Port        int    // PORT — 0 = first free from 8070 to 8079
-	Bind        string // BIND — "auto" or one IPv4 address
+	Bind        string // BIND — "auto", "hotspot" or one IPv4 address
 	Advertise   string // ADVERTISE — address for the QR link when it differs from BIND
 	MaxFileGB   int    // MAX_FILE_GB
 	Path        string // the file read ("" = defaults only)
@@ -104,8 +104,8 @@ func (c Config) Validate() error {
 	if c.Port < 0 || c.Port > 65535 {
 		bad = append(bad, "PORT must be 0 (auto) or 1-65535")
 	}
-	if c.Bind != "auto" && net.ParseIP(c.Bind).To4() == nil {
-		bad = append(bad, fmt.Sprintf("BIND must be auto or an IPv4 address, got %q", c.Bind))
+	if c.Bind != "auto" && c.Bind != "hotspot" && net.ParseIP(c.Bind).To4() == nil {
+		bad = append(bad, fmt.Sprintf("BIND must be auto, hotspot or an IPv4 address, got %q", c.Bind))
 	}
 	if c.Advertise != "" && net.ParseIP(c.Advertise).To4() == nil {
 		bad = append(bad, fmt.Sprintf("ADVERTISE must be an IPv4 address, got %q", c.Advertise))
