@@ -81,7 +81,7 @@ func TestPick(t *testing.T) {
 		{"auto", []string{"lan"}, []Candidate{wifi, lan}, "192.168.1.5"},
 	}
 	for i, c := range cases {
-		got, err := Pick(c.bind, Order(c.cands, c.order))
+		got, err := Pick(c.bind, Order(c.cands, c.order), "")
 		if c.want == "" {
 			if err == nil {
 				t.Errorf("%d: Pick(%s) = %v, want an error", i, c.bind, got.IP)
@@ -112,6 +112,28 @@ func TestDevice(t *testing.T) {
 	} {
 		if got := Device(ua); got != want {
 			t.Errorf("Device(%q) = %q, want %q", ua, got, want)
+		}
+	}
+}
+
+// [2.8]: the door keeps a working address while it is allowed; it moves only when that address is gone.
+func TestPickKeepsTheDoor(t *testing.T) {
+	hot, usb, wifi := cand("wlo1", "172.20.10.3"), cand("enx1", "172.20.10.6"), cand("wlo1", "192.168.1.9")
+	all := strings.Split(DefaultOrder, ",")
+	cases := []struct {
+		bind, prefer string
+		cands        []Candidate
+		want         string
+	}{
+		{"hotspot", "172.20.10.6", []Candidate{hot, usb}, "172.20.10.6"},  // the Wi-Fi hotspot appears → stay on USB
+		{"hotspot", "172.20.10.6", []Candidate{hot}, "172.20.10.3"},       // USB gone → move
+		{"hotspot", "192.168.1.9", []Candidate{wifi, usb}, "172.20.10.6"}, // a foreign Wi-Fi is never kept under hotspot
+		{"auto", "192.168.1.9", []Candidate{hot, wifi}, "192.168.1.9"},
+	}
+	for i, c := range cases {
+		got, err := Pick(c.bind, Order(c.cands, all), c.prefer)
+		if err != nil || got.IP.String() != c.want {
+			t.Errorf("%d: got %v %v, want %s", i, got.IP, err, c.want)
 		}
 	}
 }

@@ -5,6 +5,8 @@
 package phonenet
 
 import (
+	"time"
+
 	"github.com/nishannorunobi/updown/internal/connection"
 )
 
@@ -41,3 +43,30 @@ func (w *Watcher) Last() Choice { return w.last }
 
 // Reset forgets the last choice: the next Check reports a change, so the door is reopened with a new link.
 func (w *Watcher) Reset() { w.seen = false }
+
+// Relink keeps the phone's link through a short dropout ([2.8]): when the door closes, its address, port and
+// token are remembered; the SAME address back within Grace → the same port + token, so the page open on the
+// phone carries on. Grace 0 = always a new link. Forget (🔑 New link) drops what was remembered.
+type Relink struct {
+	Grace time.Duration
+	qr    string
+	port  int
+	token string
+	at    time.Time
+}
+
+// Remember is called when the door closes.
+func (r *Relink) Remember(qr string, port int, token string, now time.Time) {
+	r.qr, r.port, r.token, r.at = qr, port, token, now
+}
+
+// Reuse returns the remembered port + token when qr is the same address and it is still within Grace.
+func (r *Relink) Reuse(qr string, now time.Time) (port int, token string, ok bool) {
+	if r.Grace <= 0 || r.token == "" || qr != r.qr || now.Sub(r.at) > r.Grace {
+		return 0, "", false
+	}
+	return r.port, r.token, true
+}
+
+// Forget drops the remembered link (a new link was asked for, or it was reused once).
+func (r *Relink) Forget() { *r = Relink{Grace: r.Grace} }

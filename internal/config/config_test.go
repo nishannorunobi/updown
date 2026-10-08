@@ -69,26 +69,26 @@ func TestBindHotspot(t *testing.T) {
 
 func TestSoftKeysNeverStop(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "updown.conf")
-	os.WriteFile(p, []byte("CHECK_SECONDS=5\nCONNECTIONS=usb, hotspot\nPAGE_PARTS=qr_codes\nPAGE_REFRESH_SECONDS=2\nLOG_LINES=50\nCONTROLS_URL=http://localhost:8069/\n"), 0o644)
+	os.WriteFile(p, []byte("CHECK_SECONDS=5\nCONNECTIONS=usb, hotspot\nPAGE_PARTS=qr_codes\nPAGE_REFRESH_SECONDS=2\nLOG_LINES=50\nCONTROLS_URL=http://localhost:8069/\nRELINK_GRACE_SECONDS=0\n"), 0o644)
 	c, err := Load(p, false)
 	if err != nil || len(c.Warnings) != 0 {
 		t.Fatal(err, c.Warnings)
 	}
 	if c.CheckSeconds != 5 || strings.Join(c.Connections, ",") != "usb,hotspot" || strings.Join(c.PageParts, ",") != "qr_codes" ||
-		c.PageRefreshSec != 2 || c.LogLines != 50 || c.ControlsURL != "http://localhost:8069" {
+		c.PageRefreshSec != 2 || c.LogLines != 50 || c.ControlsURL != "http://localhost:8069" || c.RelinkGraceSec != 0 {
 		t.Errorf("got %+v", c)
 	}
 
-	os.WriteFile(p, []byte("CHECK_SECONDS=0\nCONNECTIONS=pigeon\nPAGE_REFRESH_SECONDS=x\nLOG_LINES=1\nCONTROLS_URL=http://example.com:8069\n"), 0o644)
+	os.WriteFile(p, []byte("CHECK_SECONDS=0\nCONNECTIONS=pigeon\nPAGE_REFRESH_SECONDS=x\nLOG_LINES=1\nCONTROLS_URL=http://example.com:8069\nRELINK_GRACE_SECONDS=-5\n"), 0o644)
 	c, err = Load(p, false)
 	if err != nil {
 		t.Fatalf("wrong soft values must not stop updown: %v", err)
 	}
 	d := Default()
-	if c.CheckSeconds != 3 || strings.Join(c.Connections, ",") != strings.Join(d.Connections, ",") || c.PageRefreshSec != 1 || c.LogLines != 500 || c.ControlsURL != "" {
+	if c.CheckSeconds != 3 || strings.Join(c.Connections, ",") != strings.Join(d.Connections, ",") || c.PageRefreshSec != 1 || c.LogLines != 500 || c.ControlsURL != "" || c.RelinkGraceSec != 60 {
 		t.Errorf("want defaults, got %+v", c)
 	}
-	if len(c.Warnings) != 6 { // pigeon unknown + none left, and one per other key
+	if len(c.Warnings) != 7 { // pigeon unknown + none left, and one per other key
 		t.Errorf("warnings: %q", c.Warnings)
 	}
 }

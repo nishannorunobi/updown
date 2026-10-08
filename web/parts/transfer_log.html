@@ -6,7 +6,7 @@
   .tlog li { padding:3px 0; border-top:1px solid var(--line); overflow-wrap:anywhere; }
   .tlog li:first-child { border-top:0; }
   .tlog time { color:var(--muted); margin-right:8px; }
-  .tlog .ok { color:var(--ok); } .tlog .bad { color:var(--bad); }
+  .tlog .ok { color:var(--ok); } .tlog .bad { color:var(--bad); } .tlog .warn { color:var(--warn); }
 </style>
 <section class="tlog">
   <h2>Transfer log</h2>
@@ -23,8 +23,10 @@
       const li = document.createElement("li"), t = document.createElement("time"), sp = document.createElement("span");
       t.textContent = new Date(l.time).toLocaleTimeString();
       sp.textContent = l.line;
-      if (/refused|failed|stopped|no phone network|cannot/i.test(l.line)) sp.className = "bad";
-      else if (/finished|connected/i.test(l.line)) sp.className = "ok";
+      // red = a real problem; amber = worth a look (WARN, no phone network); a normal stop (idle) is not red ([2.8])
+      if (/refused|failed|cannot|stopped: interrupted/i.test(l.line)) sp.className = "bad";
+      else if (/^WARN|no phone network/i.test(l.line)) sp.className = "warn";
+      else if (/finished|connected|the same link/i.test(l.line)) sp.className = "ok";
       li.append(t, sp);
       ul.prepend(li);
     }

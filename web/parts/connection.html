@@ -174,7 +174,7 @@
     const s = d.status, c = s.connection || { state: s.send ? "hotspot" : "none", via: "", pc: hostOf(s.send) };
     for (const l of s.log) {                                   // the connection-related lines of updown's log
       if (/phone connected|listening on|no phone network|stopped|refused .*(session|second|another)/i.test(l.line))
-        log(/refused|stopped|no phone network/i.test(l.line) ? "bad" : (/connected/i.test(l.line) ? "ok" : "warn"), l.line, new Date(l.time));
+        log(/refused|no phone network/i.test(l.line) ? "bad" : (/connected|the same link/i.test(l.line) ? "ok" : "warn"), l.line, new Date(l.time));
     }
     const how = c.state === "hotspot" ? "📶 phone hotspot over " + (VIA[c.via] || c.via)
               : "🌐 " + (VIA[c.via] || "a network") + " — not your phone's hotspot";

@@ -80,7 +80,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return selfCheck(rel, cfg, stdout, stderr)
 	}
 	if *address { // the address the phone's door would use now (BIND), or why there is none
-		c := choose(cfg)
+		c := choose(cfg, "")
 		if !c.Open() {
 			return fail("%s", c.Reason)
 		}
@@ -149,10 +149,16 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	go func() { served <- hs.Serve(hostLn) }()
 	say("open this page on this PC to show the QR codes: http://localhost:%d", cfg.HostPort)
 
-	// The phone's door: a listener on the address BIND allows, a NEW token + QR codes each time it opens.
+	// The phone's door: a listener on the address BIND allows, a NEW token + QR codes each time it opens —
+	// except when the SAME address comes back within RELINK_GRACE_SECONDS ([2.8]): then the same port + token, so
+	// the page open on the phone carries on through a short dropout.
 	var door *http.Server
+	doorPort, doorQR := 0, ""
+	relink := &phonenet.Relink{Grace: time.Duration(cfg.RelinkGraceSec) * time.Second}
+	fresh := false // 🔑 New link: never reuse
 	closeDoor := func() {
 		if door != nil {
+			relink.Remember(doorQR, doorPort, srv.Link().Token, time.Now())
 			dctx, dcancel := context.WithTimeout(context.Background(), 2*time.Second)
 			if door.Shutdown(dctx) != nil {
 				door.Close() // cut open transfers; their part files are removed by the handlers
@@ -163,14 +169,25 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		srv.SetLink(server.Link{})
 	}
 	openDoor := func(c phonenet.Choice) error {
-		ln, err := listen(c.Listen, cfg.Port)
-		if err != nil {
-			return err
+		var ln net.Listener
+		var token, how string
+		if port, tok, ok := relink.Reuse(c.QR, time.Now()); ok && !fresh {
+			if l, err := listen(c.Listen, port); err == nil {
+				ln, token, how = l, tok, "the same link as before — the phone's page carries on"
+			}
 		}
-		token, err := server.NewToken()
-		if err != nil {
-			ln.Close()
-			return err
+		relink.Forget()
+		if ln == nil {
+			l, err := listen(c.Listen, cfg.Port)
+			if err != nil {
+				return err
+			}
+			t, err := server.NewToken()
+			if err != nil {
+				l.Close()
+				return err
+			}
+			ln, token, how = l, t, "new QR codes"
 		}
 		base := "http://" + net.JoinHostPort(c.QR, strconv.Itoa(ln.Addr().(*net.TCPAddr).Port))
 		send, receive := base+"/send?t="+token, base+"/receive?t="+token // only in the QR codes, never in the console
@@ -182,11 +199,13 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 		srv.SetLink(server.Link{Token: token, SendLink: send, ReceiveLink: receive, SendQR: qr.SVG(sq, 4), ReceiveQR: qr.SVG(rq, 4)})
 		door = &http.Server{Handler: srv, ReadHeaderTimeout: 30 * time.Second}
+		doorPort, doorQR = ln.Addr().(*net.TCPAddr).Port, c.QR
 		go door.Serve(ln)
-		srv.Log("listening on %s (%s) — new QR codes", ln.Addr(), c.How)
+		srv.Log("listening on %s (%s) — %s", ln.Addr(), c.How, how)
 		return nil
 	}
-	watch := &phonenet.Watcher{Choose: func() phonenet.Choice { return choose(cfg) }}
+	watch := &phonenet.Watcher{}
+	watch.Choose = func() phonenet.Choice { return choose(cfg, watch.Last().Listen) } // keep the working door ([2.8])
 	follow := func() {
 		now, changed := watch.Check()
 		if !changed {
@@ -252,8 +271,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				}
 				srv.Log("new link asked for — the old QR codes stop working")
 				watch.Reset() // the next check reopens the door: a new token, new QR codes
+				fresh = true
 			}
 			follow()
+			fresh = false
 			c.reply <- nil
 		case err := <-served:
 			return fail("the PC's page stopped: %v", err)
@@ -298,18 +319,21 @@ func pageParts(names []string) ([]string, []string) {
 }
 
 // choose decides where the phone's door goes now (BIND, ADVERTISE, CONNECTIONS) — or why there is none.
-func choose(cfg config.Config) phonenet.Choice {
+func choose(cfg config.Config, prefer string) phonenet.Choice {
 	cands := connection.Candidates(cfg.Connections)
 	var c phonenet.Choice
 	switch cfg.Bind {
 	case "auto", "hotspot":
-		cand, err := connection.Pick(cfg.Bind, cands)
+		cand, err := connection.Pick(cfg.Bind, cands, prefer)
 		if err != nil {
 			return phonenet.Choice{Reason: err.Error()}
 		}
 		ip := cand.IP.String()
 		c = phonenet.Choice{Cand: &cand, Listen: ip, QR: ip, How: cand.Type.Label + " on " + cand.Iface}
 	default:
+		if cfg.Bind != "0.0.0.0" && !ownAddress(cfg.Bind) {
+			return phonenet.Choice{Reason: cfg.Bind + " (BIND) is not an address of this PC — set BIND=hotspot or auto, or one of this PC's addresses"}
+		}
 		c = phonenet.Choice{Listen: cfg.Bind, QR: cfg.Bind, How: "BIND"}
 		if cfg.Bind == "0.0.0.0" {
 			c.How, c.QR = "all interfaces", ""
@@ -325,6 +349,17 @@ func choose(cfg config.Config) phonenet.Choice {
 		return phonenet.Choice{Reason: "BIND=0.0.0.0 needs ADVERTISE (no phone-reachable address found here)"}
 	}
 	return c
+}
+
+// ownAddress reports whether ip is one of this PC's addresses (a fixed BIND elsewhere can never open).
+func ownAddress(ip string) bool {
+	addrs, _ := net.InterfaceAddrs()
+	for _, a := range addrs {
+		if n, ok := a.(*net.IPNet); ok && n.IP.String() == ip {
+			return true
+		}
+	}
+	return false
 }
 
 // listen opens PORT, or with PORT=0 the first free port from 8070 to 8079.

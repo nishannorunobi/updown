@@ -392,3 +392,20 @@ func TestHostLayoutAndControls(t *testing.T) {
 		t.Errorf("GET must not run a control point")
 	}
 }
+
+// [2.8]: the browser's own requests are a quiet 404 — no "refused" line in the log.
+func TestBrowserAsksAreQuiet(t *testing.T) {
+	var lines []string
+	s := New(Options{Token: tok, Page: web.Index, Logf: func(f string, a ...any) { lines = append(lines, f) }})
+	for _, p := range []string{"/favicon.ico", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png", "/robots.txt"} {
+		if w := do(s, "GET", p, "172.20.10.1", nil); w.Code != 404 {
+			t.Errorf("%s: %d, want 404", p, w.Code)
+		}
+	}
+	if len(lines) != 0 {
+		t.Errorf("the browser's own requests were logged: %q", lines)
+	}
+	if w := do(s, "GET", "/api/files", "172.20.10.1", nil); w.Code != 403 || len(lines) != 1 {
+		t.Errorf("a real request without a token must still be refused and logged: %d %q", w.Code, lines)
+	}
+}

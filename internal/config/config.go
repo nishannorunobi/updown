@@ -1,6 +1,7 @@
 // Package config reads updown.conf — the user's settings (docs/contract.md §2). Every key
 // is optional; a missing or empty key takes its default. The page's and the network watcher's settings
-// ([2.7]: CHECK_SECONDS, CONNECTIONS, PAGE_PARTS, PAGE_REFRESH_SECONDS, LOG_LINES, CONTROLS_URL) never stop
+// ([2.7]: CHECK_SECONDS, CONNECTIONS, PAGE_PARTS, PAGE_REFRESH_SECONDS, LOG_LINES, CONTROLS_URL; [2.8]:
+// RELINK_GRACE_SECONDS) never stop
 // updown: a wrong value runs on its default and is reported in Warnings.
 package config
 
@@ -44,6 +45,7 @@ type Config struct {
 	PageRefreshSec int      // PAGE_REFRESH_SECONDS — how often the PC's page asks for news
 	LogLines       int      // LOG_LINES — log lines kept for the page
 	ControlsURL    string   // CONTROLS_URL — where the page finds its buttons (updown-agent); "" = no buttons
+	RelinkGraceSec int      // RELINK_GRACE_SECONDS — the same address back within this → the same link ([2.8]); 0 = always new
 	Warnings       []string // values that were wrong and replaced by their default
 }
 
@@ -66,6 +68,7 @@ func Default() Config {
 		PageParts:      list(DefaultPageParts),
 		PageRefreshSec: 1,
 		LogLines:       500,
+		RelinkGraceSec: 60,
 	}
 }
 
@@ -141,6 +144,7 @@ func (c *Config) soft(m map[string]string) {
 	num("CHECK_SECONDS", &c.CheckSeconds, 1, 3600)
 	num("PAGE_REFRESH_SECONDS", &c.PageRefreshSec, 1, 60)
 	num("LOG_LINES", &c.LogLines, 10, 100000)
+	num("RELINK_GRACE_SECONDS", &c.RelinkGraceSec, 0, 3600)
 
 	if v := strings.TrimSpace(m["CONNECTIONS"]); v != "" {
 		var known []string

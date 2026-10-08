@@ -218,6 +218,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.hostMux.ServeHTTP(w, r)
 		return
 	}
+	// What a browser asks for by itself (an icon, robots.txt) carries no token: a quiet 404 — not a "refused"
+	// line that looks like an attack ([2.8], a false alarm in the owner's iPhone test).
+	if browserAsk(r.URL.Path) {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
 	got := r.URL.Query().Get("t")
 	cur := s.Link().Token
 	if cur == "" || subtle.ConstantTimeCompare([]byte(got), []byte(cur)) != 1 {
@@ -240,6 +246,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.lastSeen.Store(time.Now().UnixNano())
 	s.mux.ServeHTTP(w, r)
+}
+
+// browserAsk reports the paths a browser requests on its own: /favicon.ico, /apple-touch-icon*.png, /robots.txt.
+func browserAsk(p string) bool {
+	return p == "/favicon.ico" || p == "/robots.txt" || strings.HasPrefix(p, "/apple-touch-icon") && strings.HasSuffix(p, ".png")
 }
 
 func clientIP(r *http.Request) string {

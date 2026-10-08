@@ -125,7 +125,14 @@ func Order(cands []Candidate, order []string) []Candidate {
 
 // Pick chooses the address for BIND=auto (the first) or BIND=hotspot (the first of the phone's own networks —
 // never a foreign Wi-Fi or LAN). None → an error with the reason in plain words.
-func Pick(bind string, cands []Candidate) (Candidate, error) {
+// prefer = the door's current address ([2.8]): while it is still allowed, it is kept — the door never jumps away
+// from a working network because a "better" one shows up (that would end the phone's session).
+func Pick(bind string, cands []Candidate, prefer string) (Candidate, error) {
+	for _, c := range cands {
+		if prefer != "" && c.IP.String() == prefer && (bind == "auto" || c.Type.Phone) {
+			return c, nil
+		}
+	}
 	for _, c := range cands {
 		if bind == "auto" || c.Type.Phone {
 			return c, nil
