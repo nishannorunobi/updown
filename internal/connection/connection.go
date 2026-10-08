@@ -1,4 +1,4 @@
-// Package connection knows the ways this PC can reach the phone (docs/contract.md §2, UPDOWN-new [2.7]).
+// Package connection knows the ways this PC can reach the phone (docs/contract.md §2, UPDOWN-61 [2.7]).
 // Every way is its own file — hotspot.go, usb.go, bluetooth.go, wifi.go, lan.go — that registers a Type at
 // start; a new way = a new file here + its name in updown.conf's CONNECTIONS. Nothing else changes.
 // device_connection.go describes the phone itself (the browser that opened the page).
