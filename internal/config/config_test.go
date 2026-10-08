@@ -57,3 +57,12 @@ func TestValuesAndValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestBindHotspot(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "updown.conf")
+	os.WriteFile(p, []byte("BIND=hotspot\n"), 0o644)
+	c, err := Load(p, false)
+	if err != nil || c.Bind != "hotspot" {
+		t.Fatalf("BIND=hotspot: got %q, %v", c.Bind, err)
+	}
+}
