@@ -272,3 +272,82 @@ func TestHostParts(t *testing.T) {
 		}
 	}
 }
+
+// [2.6] UPDOWN-52: the PC's page on its own loopback listener — no key, but only for this PC's Host names.
+func TestHostHandlerLocalhostOnly(t *testing.T) {
+	s, _, _ := newTest(t)
+	h := s.HostHandler()
+	get := func(path, host string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", path, nil)
+		r.Host = host
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	for _, host := range []string{"localhost:8070", "127.0.0.1:8070", "[::1]:8070", "localhost"} {
+		if w := get("/", host); w.Code != 200 || !strings.Contains(w.Body.String(), `data-part="connection.html"`) {
+			t.Errorf("Host %s: / gave %d, want the page", host, w.Code)
+		}
+	}
+	for _, host := range []string{"evil.example:8070", "172.20.10.3:8070", "attacker.localhost.example"} {
+		if w := get("/host/api/status", host); w.Code != http.StatusForbidden {
+			t.Errorf("Host %s: %d, want 403 (no other site may read the page — DNS rebinding)", host, w.Code)
+		}
+	}
+	if w := get("/host/part/qr_codes.html", "localhost:8070"); w.Code != 200 {
+		t.Errorf("a part without a key on localhost: %d", w.Code)
+	}
+	// the phone's door never serves the PC's page when no host key is set
+	s2 := New(Options{Token: tok, Page: web.Index, HostPage: web.Host, HostParts: web.Parts})
+	if w := do(s2, "GET", "/host?t="+tok, "172.20.10.2", nil); w.Code != http.StatusForbidden {
+		t.Errorf("/host on the phone's door: %d, want 403", w.Code)
+	}
+}
+
+func TestSetLinkRotatesAndCloses(t *testing.T) {
+	s, _, _ := newTest(t)
+	if w := do(s, "GET", "/api/info?t="+tok, "", nil); w.Code != 200 {
+		t.Fatalf("old token before the rotation: %d", w.Code)
+	}
+	s.SetLink(Link{Token: "new-token", SendLink: "http://172.20.10.3:8070/send?t=new-token"})
+	if w := do(s, "GET", "/api/info?t="+tok, "", nil); w.Code != http.StatusForbidden {
+		t.Errorf("old token after a new link: %d, want 403", w.Code)
+	}
+	if w := do(s, "GET", "/api/info?t=new-token", "172.20.10.9", nil); w.Code != 200 {
+		t.Errorf("new token (the session is free again after a new link): %d", w.Code)
+	}
+	s.SetLink(Link{}) // the door closes
+	if w := do(s, "GET", "/api/info?t=", "172.20.10.9", nil); w.Code != http.StatusForbidden {
+		t.Errorf("empty token on a closed door: %d, want 403", w.Code)
+	}
+}
+
+func TestStatusConnectionAndBrowser(t *testing.T) {
+	s, _, _ := newTest(t)
+	s.SetConnection(Connection{State: "hotspot", Via: "wifi", PC: "172.20.10.3", Iface: "wlo1"})
+	r := httptest.NewRequest("GET", "/api/info?t="+tok, nil)
+	r.RemoteAddr = "172.20.10.1:5000"
+	r.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1")
+	s.ServeHTTP(httptest.NewRecorder(), r)
+	w := do(s, "GET", "/host/api/status?k="+hostKey+"&after=0", "172.28.0.1", nil)
+	var st struct {
+		Connection Connection `json:"connection"`
+		Phone      string     `json:"phone"`
+		Agent      string     `json:"phone_agent"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Connection.Via != "wifi" || st.Connection.State != "hotspot" || st.Phone != "172.20.10.1" || st.Agent != "iPhone · Safari" {
+		t.Errorf("status: %+v phone=%q agent=%q", st.Connection, st.Phone, st.Agent)
+	}
+	for ua, want := range map[string]string{
+		"Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36":                 "Android · Chrome",
+		"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) AppleWebKit/605.1.15 CriOS/120.0 Mobile/15E148 Safari/604.1": "iPhone · Chrome",
+		"": "phone",
+	} {
+		if got := browserOf(ua); got != want {
+			t.Errorf("browserOf(%q) = %q, want %q", ua, got, want)
+		}
+	}
+}

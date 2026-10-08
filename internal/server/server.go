@@ -51,6 +51,22 @@ type Options struct {
 	ReceiveQR   string
 }
 
+// Link is the phone's current way in: a token and the two QR codes that carry it (contract §5).
+// updown hands out a new Link whenever it opens the phone's door (a new network = a new link).
+type Link struct {
+	Token, SendLink, ReceiveLink, SendQR, ReceiveQR string
+}
+
+// Connection is what the host page shows about the phone's network ([2.6], UPDOWN-52).
+type Connection struct {
+	State  string    `json:"state"`  // none · hotspot · lan
+	Via    string    `json:"via"`    // wifi · usb · bluetooth · lan · "" (none)
+	PC     string    `json:"pc"`     // this PC's address on it ("" = none)
+	Iface  string    `json:"iface"`  // e.g. wlo1, enx…, bnep0
+	Reason string    `json:"reason"` // why there is none, in plain words
+	Since  time.Time `json:"since"`
+}
+
 // logLine is one event, kept for the host page.
 type logLine struct {
 	N    int       `json:"n"`
@@ -65,6 +81,9 @@ type Server struct {
 	o        Options
 	mu       sync.Mutex
 	owner    string // client address that owns the session ("" until the first valid request)
+	agent    string // the owner's browser, short ("iPhone · Safari")
+	link     Link   // the phone's current link (token + QR); empty Token = the phone's door is closed
+	conn     Connection
 	lastSeen atomic.Int64
 	mux      *http.ServeMux
 	hostMux  *http.ServeMux
@@ -103,7 +122,8 @@ func New(o Options) *Server {
 	if o.OnTransfer == nil {
 		o.OnTransfer = func() {}
 	}
-	s := &Server{o: o, mux: http.NewServeMux(), hostMux: http.NewServeMux()}
+	s := &Server{o: o, mux: http.NewServeMux(), hostMux: http.NewServeMux(),
+		link: Link{o.Token, o.SendLink, o.ReceiveLink, o.SendQR, o.ReceiveQR}}
 	s.lastSeen.Store(time.Now().UnixNano())
 	s.mux.HandleFunc("GET /send", s.page)
 	s.mux.HandleFunc("GET /receive", s.page)
@@ -113,12 +133,45 @@ func New(o Options) *Server {
 	s.mux.HandleFunc("PUT /api/upload/{name}", s.upload)
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, http.StatusNotFound, "not found") })
 	s.hostMux.HandleFunc("GET /host", s.hostPage)
-	s.hostMux.HandleFunc("GET /host/qr/send.svg", s.hostQR(func() string { return s.o.SendQR }))
-	s.hostMux.HandleFunc("GET /host/qr/receive.svg", s.hostQR(func() string { return s.o.ReceiveQR }))
+	s.hostMux.HandleFunc("GET /{$}", s.hostPage) // the PC's page at http://localhost:8070 ([2.6])
+	s.hostMux.HandleFunc("GET /host/qr/send.svg", s.hostQR(func() string { return s.Link().SendQR }))
+	s.hostMux.HandleFunc("GET /host/qr/receive.svg", s.hostQR(func() string { return s.Link().ReceiveQR }))
 	s.hostMux.HandleFunc("GET /host/api/status", s.hostStatus)
 	s.hostMux.HandleFunc("GET /host/part/{name}", s.hostPart)
 	s.hostMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, http.StatusNotFound, "not found") })
 	return s
+}
+
+// Link returns the phone's current link.
+func (s *Server) Link() Link { s.mu.Lock(); defer s.mu.Unlock(); return s.link }
+
+// SetLink hands out a new phone link (a new door, a new network) — the old token stops working and the
+// next phone that uses the new one owns the session. An empty Link closes the phone's door.
+func (s *Server) SetLink(l Link) {
+	s.mu.Lock()
+	s.link, s.owner, s.agent = l, "", ""
+	s.mu.Unlock()
+}
+
+// SetConnection records the phone's network for the host page.
+func (s *Server) SetConnection(c Connection) { s.mu.Lock(); s.conn = c; s.mu.Unlock() }
+
+// HostHandler serves the PC's page on its own loopback listener (http://localhost:8070): no key — it can
+// only be reached from this PC — but the Host header must name this PC, so no other web site can read it
+// (DNS rebinding). It never claims the phone's session and never counts as activity.
+func (s *Server) HostHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		host := r.Host
+		if h, _, err := net.SplitHostPort(r.Host); err == nil {
+			host = h
+		}
+		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		s.hostMux.ServeHTTP(w, r)
+	})
 }
 
 // LastActivity is the time of the last accepted request (for STOP_MODE=idle).
@@ -139,7 +192,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	got := r.URL.Query().Get("t")
-	if subtle.ConstantTimeCompare([]byte(got), []byte(s.o.Token)) != 1 {
+	cur := s.Link().Token
+	if cur == "" || subtle.ConstantTimeCompare([]byte(got), []byte(cur)) != 1 {
 		s.Log("refused %s %s from %s: no/wrong token", r.Method, r.URL.Path, clientIP(r))
 		w.WriteHeader(http.StatusForbidden)
 		return
@@ -147,8 +201,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
 	s.mu.Lock()
 	if s.owner == "" {
-		s.owner = ip
-		s.Log("phone connected: %s", ip)
+		s.owner, s.agent = ip, browserOf(r.UserAgent())
+		s.Log("phone connected: %s (%s)", ip, s.agent)
 	}
 	owner := s.owner
 	s.mu.Unlock()
@@ -159,6 +213,35 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.lastSeen.Store(time.Now().UnixNano())
 	s.mux.ServeHTTP(w, r)
+}
+
+// browserOf turns a User-Agent into "iPhone · Safari" (the phone's own name is never sent by a browser).
+func browserOf(ua string) string {
+	dev := "phone"
+	for _, d := range []string{"iPhone", "iPad", "Android", "Windows", "Macintosh", "Linux"} {
+		if strings.Contains(ua, d) {
+			dev = d
+			break
+		}
+	}
+	if dev == "Macintosh" {
+		dev = "Mac"
+	}
+	br := ""
+	switch {
+	case strings.Contains(ua, "CriOS"), strings.Contains(ua, "Chrome/") && !strings.Contains(ua, "Edg/"):
+		br = "Chrome"
+	case strings.Contains(ua, "FxiOS"), strings.Contains(ua, "Firefox/"):
+		br = "Firefox"
+	case strings.Contains(ua, "Edg"):
+		br = "Edge"
+	case strings.Contains(ua, "Safari/"):
+		br = "Safari"
+	}
+	if br == "" {
+		return dev
+	}
+	return dev + " · " + br
 }
 
 func clientIP(r *http.Request) string {
@@ -454,7 +537,7 @@ func (s *Server) hostStatus(w http.ResponseWriter, r *http.Request) {
 	after := 0
 	fmt.Sscanf(r.URL.Query().Get("after"), "%d", &after)
 	s.mu.Lock()
-	owner := s.owner
+	owner, agent, link, conn := s.owner, s.agent, s.link, s.conn
 	s.mu.Unlock()
 	s.logMu.Lock()
 	lines := []logLine{}
@@ -465,7 +548,8 @@ func (s *Server) hostStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logMu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"product": s.o.Product, "version": s.o.Version, "send": s.o.SendLink, "receive": s.o.ReceiveLink,
+		"product": s.o.Product, "version": s.o.Version, "send": link.SendLink, "receive": link.ReceiveLink,
+		"connection": conn, "phone_agent": agent,
 		"phone": owner, "stop_mode": s.o.StopMode, "log": lines,
 	})
 }

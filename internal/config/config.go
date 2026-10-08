@@ -28,7 +28,8 @@ type Config struct {
 	ShareDir    string // SHARE_DIR — default: the OS Downloads folder (the Receive screen)
 	StopMode    string // STOP_MODE
 	IdleMinutes int    // IDLE_MINUTES
-	Port        int    // PORT — 0 = first free from 8070 to 8079
+	Port        int    // PORT — the phone's door: 0 = first free from 8070 to 8079
+	HostPort    int    // HOST_PORT — the PC's page at http://localhost:HOST_PORT (loopback only)
 	Bind        string // BIND — "auto", "hotspot" or one IPv4 address
 	Advertise   string // ADVERTISE — address for the QR link when it differs from BIND
 	MaxFileGB   int    // MAX_FILE_GB
@@ -42,6 +43,7 @@ func Default() Config {
 		ShareDir:    DownloadsDir(),
 		StopMode:    StopEnter,
 		IdleMinutes: 15,
+		HostPort:    8070,
 		Bind:        "auto",
 		MaxFileGB:   10,
 	}
@@ -80,7 +82,7 @@ func Load(path string, optional bool) (Config, error) {
 	str("STOP_MODE", &c.StopMode)
 	str("BIND", &c.Bind)
 	str("ADVERTISE", &c.Advertise)
-	for key, dst := range map[string]*int{"IDLE_MINUTES": &c.IdleMinutes, "PORT": &c.Port, "MAX_FILE_GB": &c.MaxFileGB} {
+	for key, dst := range map[string]*int{"IDLE_MINUTES": &c.IdleMinutes, "PORT": &c.Port, "HOST_PORT": &c.HostPort, "MAX_FILE_GB": &c.MaxFileGB} {
 		if err := num(key, dst); err != nil {
 			return c, err
 		}
@@ -103,6 +105,9 @@ func (c Config) Validate() error {
 	}
 	if c.Port < 0 || c.Port > 65535 {
 		bad = append(bad, "PORT must be 0 (auto) or 1-65535")
+	}
+	if c.HostPort < 1 || c.HostPort > 65535 {
+		bad = append(bad, "HOST_PORT must be 1-65535")
 	}
 	if c.Bind != "auto" && c.Bind != "hotspot" && net.ParseIP(c.Bind).To4() == nil {
 		bad = append(bad, fmt.Sprintf("BIND must be auto, hotspot or an IPv4 address, got %q", c.Bind))

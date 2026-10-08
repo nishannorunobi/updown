@@ -59,3 +59,14 @@ func TestPick(t *testing.T) {
 		}
 	}
 }
+
+func TestVia(t *testing.T) {
+	for iface, want := range map[string]string{"wlo1": "wifi", "wlan0": "wifi", "enx4663b6422c6f": "usb", "usb0": "usb", "bnep0": "bluetooth", "eth0": "lan"} {
+		if got := (Candidate{Iface: iface}).Via(); got != want {
+			t.Errorf("Via(%s) = %s, want %s", iface, got, want)
+		}
+	}
+	if k, ok := Classify("bnep0", net.ParseIP("192.168.44.2")); !ok || k != Hotspot {
+		t.Errorf("bnep0 should be a phone hotspot (Bluetooth tethering), got %v %v", k, ok)
+	}
+}
