@@ -44,8 +44,8 @@ Same `KEY=VALUE` format. Every key is optional; an empty or missing key takes th
 |---|---|---|
 | `RECEIVE_DIR` | the OS Downloads folder¹ | where uploads from the phone are saved |
 | `SHARE_DIR` | the OS Downloads folder¹ | the folder whose files the phone sees on the Receive screen (not recursive) |
-| `STOP_MODE` | `enter` | `enter` (Enter in the terminal) · `after-transfer` (after the first completed upload or download) · `idle` (no request for `IDLE_MINUTES`) |
-| `IDLE_MINUTES` | `15` | used by `STOP_MODE=idle`; also a hard stop for the other modes when nothing happens |
+| `STOP_MODE` | `enter` | `enter` (Enter in the terminal) · `after-transfer` (after the first completed upload or download) · `idle` (no request and no running transfer for `IDLE_MINUTES`) · `never` (only Ctrl+C / docker stop — the updown-agent service default, [2.8.1]) |
+| `IDLE_MINUTES` | `15` | used by `STOP_MODE=idle`; also a hard stop for `enter` and `after-transfer` when nothing happens. A download or upload in progress is never "nothing" — it can run for hours ([2.8.1]) |
 | `HOST_PORT` | `8070` | the PC's page at `http://localhost:HOST_PORT` — loopback only, no key, the link never changes ([2.6]) |
 | `PORT` | `0` | `0` = first free port from 8070 to 8079; otherwise that port |
 | `BIND` | `auto` | `auto` = pick the phone-reachable address (order: phone hotspot 172.20.10.x / USB tether, then Wi-Fi, then other private LAN) · `hotspot` = ONLY the phone hotspot / USB tether, never another network (none → exit 1 with the reason) · or one IPv4 address |

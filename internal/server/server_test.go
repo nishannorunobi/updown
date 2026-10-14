@@ -409,3 +409,42 @@ func TestBrowserAsksAreQuiet(t *testing.T) {
 		t.Errorf("a real request without a token must still be refused and logged: %d %q", w.Code, lines)
 	}
 }
+
+// [2.8.1] UPDOWN-86: a transfer of hours is one request — while it runs, updown is never idle.
+func TestRunningTransferIsActivity(t *testing.T) {
+	s, _, _ := newTest(t)
+	s.lastSeen.Store(time.Now().Add(-2 * time.Hour).UnixNano()) // the request started two hours ago
+	if time.Since(s.LastActivity()) < time.Hour {
+		t.Fatal("setup: should look idle")
+	}
+	done := s.transfer()
+	if time.Since(s.LastActivity()) > time.Second || s.Transfers() != 1 {
+		t.Errorf("a running transfer must count as activity now (transfers=%d)", s.Transfers())
+	}
+	time.Sleep(10 * time.Millisecond)
+	done()
+	if s.Transfers() != 0 || time.Since(s.LastActivity()) > time.Second {
+		t.Errorf("the end of a transfer counts as activity (transfers=%d)", s.Transfers())
+	}
+}
+
+// A real download through the handler marks itself as running while the body is being sent.
+func TestDownloadCountsWhileRunning(t *testing.T) {
+	s, _, share := newTest(t)
+	os.WriteFile(filepath.Join(share, "big.bin"), bytes.Repeat([]byte("x"), 1<<20), 0o644)
+	seen := 0
+	w := &probeWriter{ResponseRecorder: httptest.NewRecorder(), on: func() { seen = s.Transfers() }}
+	r := httptest.NewRequest("GET", "/api/files/big.bin?t="+tok, nil)
+	r.RemoteAddr = "172.20.10.1:5000"
+	s.ServeHTTP(w, r)
+	if w.Code != 200 || seen != 1 || s.Transfers() != 0 {
+		t.Errorf("code %d, transfers while sending %d (want 1), after %d (want 0)", w.Code, seen, s.Transfers())
+	}
+}
+
+type probeWriter struct {
+	*httptest.ResponseRecorder
+	on func()
+}
+
+func (p *probeWriter) Write(b []byte) (int, error) { p.on(); return p.ResponseRecorder.Write(b) }

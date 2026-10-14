@@ -24,6 +24,7 @@ const (
 	StopEnter         = "enter"
 	StopAfterTransfer = "after-transfer"
 	StopIdle          = "idle"
+	StopNever         = "never" // runs until stopped by hand (Ctrl+C, docker stop, bash stop.sh) — [2.8.1]
 )
 
 // Config is updown.conf after defaults and validation.
@@ -177,9 +178,9 @@ func (c *Config) soft(m map[string]string) {
 func (c Config) Validate() error {
 	var bad []string
 	switch c.StopMode {
-	case StopEnter, StopAfterTransfer, StopIdle:
+	case StopEnter, StopAfterTransfer, StopIdle, StopNever:
 	default:
-		bad = append(bad, fmt.Sprintf("STOP_MODE must be enter, after-transfer or idle, got %q", c.StopMode))
+		bad = append(bad, fmt.Sprintf("STOP_MODE must be enter, after-transfer, idle or never, got %q", c.StopMode))
 	}
 	if c.IdleMinutes < 1 {
 		bad = append(bad, "IDLE_MINUTES must be 1 or more")

@@ -95,6 +95,7 @@ type Server struct {
 	link     Link   // the phone's current link (token + QR); empty Token = the phone's door is closed
 	conn     Connection
 	lastSeen atomic.Int64
+	active   atomic.Int64 // downloads + uploads running now: they count as activity ([2.8.1] UPDOWN-86)
 	mux      *http.ServeMux
 	hostMux  *http.ServeMux
 	logMu    sync.Mutex
@@ -201,8 +202,26 @@ func (s *Server) HostHandler() http.Handler {
 	})
 }
 
-// LastActivity is the time of the last accepted request (for STOP_MODE=idle).
-func (s *Server) LastActivity() time.Time { return time.Unix(0, s.lastSeen.Load()) }
+// LastActivity is the time of the last accepted request or finished transfer (for STOP_MODE=idle) — and "now"
+// while a download or upload is running: a transfer of hours is ONE request, and must never look idle ([2.8.1]).
+func (s *Server) LastActivity() time.Time {
+	if s.active.Load() > 0 {
+		return time.Now()
+	}
+	return time.Unix(0, s.lastSeen.Load())
+}
+
+// Transfers is the number of downloads and uploads running now.
+func (s *Server) Transfers() int { return int(s.active.Load()) }
+
+// transfer marks one download/upload as running; call the returned func when it ends (its end counts as activity).
+func (s *Server) transfer() func() {
+	s.active.Add(1)
+	return func() {
+		s.lastSeen.Store(time.Now().UnixNano())
+		s.active.Add(-1)
+	}
+}
 
 // ServeHTTP checks the token and the session, then routes.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -370,6 +389,7 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
+	defer s.transfer()()
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": entry.Name}))
 	start := time.Now()
 	cw := &countingWriter{ResponseWriter: w, code: http.StatusOK}
@@ -457,6 +477,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	defer s.transfer()()
 	s.Log("upload started: %s (%s)", name, human(r.ContentLength))
 	start := time.Now()
 	h := sha256.New()

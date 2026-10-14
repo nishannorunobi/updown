@@ -46,7 +46,7 @@ func TestValuesAndValidation(t *testing.T) {
 		t.Errorf("got %+v", c)
 	}
 
-	os.WriteFile(p, []byte("STOP_MODE=never\nPORT=70000\nBIND=phone\n"), 0o644)
+	os.WriteFile(p, []byte("STOP_MODE=sometimes\nPORT=70000\nBIND=phone\n"), 0o644)
 	_, err = Load(p, false)
 	if err == nil {
 		t.Fatal("want validation errors")
@@ -90,5 +90,16 @@ func TestSoftKeysNeverStop(t *testing.T) {
 	}
 	if len(c.Warnings) != 7 { // pigeon unknown + none left, and one per other key
 		t.Errorf("warnings: %q", c.Warnings)
+	}
+}
+
+func TestStopModeNever(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "updown.conf")
+	os.WriteFile(p, []byte("STOP_MODE=never\n"), 0o644)
+	if c, err := Load(p, false); err != nil || c.StopMode != StopNever {
+		t.Errorf("STOP_MODE=never: %v %+v", err, c.StopMode)
+	}
+	if _, err := Load(filepath.Join("..", "..", "updown-agent", "updown.conf"), false); err != nil {
+		t.Errorf("the service settings must load: %v", err)
 	}
 }

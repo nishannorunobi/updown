@@ -280,7 +280,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			return fail("the PC's page stopped: %v", err)
 		case <-tick.C:
 			follow()
-			if time.Since(srv.LastActivity()) > idle {
+			if cfg.StopMode != config.StopNever && time.Since(srv.LastActivity()) > idle { // a running transfer is never idle
 				reason = fmt.Sprintf("idle for %d minutes", cfg.IdleMinutes)
 			}
 		}
@@ -387,8 +387,11 @@ func offeredText(n int, dir string) string {
 }
 
 func stopText(cfg config.Config) string {
-	if cfg.StopMode == config.StopIdle {
+	switch cfg.StopMode {
+	case config.StopIdle:
 		return fmt.Sprintf("idle %d min", cfg.IdleMinutes)
+	case config.StopNever:
+		return "only by hand"
 	}
 	return cfg.StopMode
 }
@@ -398,7 +401,9 @@ func stopHint(cfg config.Config) string {
 	case config.StopAfterTransfer:
 		return "stops after the first finished transfer (Ctrl+C stops now)"
 	case config.StopIdle:
-		return fmt.Sprintf("stops after %d idle minutes (Ctrl+C stops now)", cfg.IdleMinutes)
+		return fmt.Sprintf("stops after %d idle minutes, never during a transfer (Ctrl+C stops now)", cfg.IdleMinutes)
+	case config.StopNever:
+		return "runs until you stop it (Ctrl+C · docker stop · bash stop.sh)"
 	}
 	return "press Enter to stop"
 }
