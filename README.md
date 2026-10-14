@@ -109,7 +109,7 @@ Open it in this PC's browser: **two QR codes** and the live log.
   changes. updown itself opens the phone's door on the hotspot when it appears, moves it when the address
   changes and closes it when the hotspot is gone (the page turns red); each new door = new QR codes.
 - **The buttons** on the page ([2.7], `docs/ui/host_page_buttons_*.png`): 📶 Hotspot only / 🌐 Any network
-  (writes `BIND` into `updown-agent/updown.conf`, restarts updown), ⟳ Check now, 🔑 New link. Each is one line
+  (writes `BIND` into `updown-agent/updown.conf`, restarts updown), ⟳ Check now, 🔄 Refresh QR code. Each is one line
   in `updown-agent/actions.conf` + one file in `updown-agent/actions/` — a new button = a new line + a new file.
 - After 15 idle minutes updown stops and the agent starts it again (same page). A crash is restarted the
   same way. Settings: `updown-agent/updown.conf`.

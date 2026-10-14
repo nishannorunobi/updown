@@ -37,7 +37,7 @@ ACTIONS_DIR = os.path.join(os.path.dirname(ACTIONS_CONF), "actions")
 # actions.conf missing → these buttons (the shipped file's lines)
 DEFAULT_ACTIONS = """network_mode | 📶 | Network | network_mode.py | yes
 check_now | ⟳ | Check now | check_now.py | yes
-new_link | 🔑 | New link | new_link.py | yes"""
+new_link | 🔄 | Refresh QR code | new_link.py | yes"""
 NAME_RE, FILE_RE = re.compile(r"^[a-z0-9_]+$"), re.compile(r"^[a-z0-9_]+\.py$")
 
 

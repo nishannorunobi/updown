@@ -8,7 +8,7 @@
 #             C2 the buttons come from actions.conf: the switch with its choices, the buttons, SHOWN=no hidden
 #             C3 a broken action file → only its button is greyed, with the reason
 #             C4 ⟳ Check now (check_now.py) answers with the connection
-#             C5 🔑 New link (new_link.py) → a new token: the page's link changes
+#             C5 🔄 Refresh QR code (new_link.py) → a new token: the page's link changes
 #             C6 another web site can press no button (agent and updown both answer 403); other Host → 403
 #             C7 the switch (network_mode.py) → BIND written into updown.conf, updown restarted, the page back
 #             C8 in a real browser (headless Chrome, when installed) the page draws the buttons — CSP lets it reach them
@@ -69,9 +69,9 @@ before="$(js "d['send']" "$(status)")"
 r="$(curl -s --max-time 20 -X POST "$BTN/action/new_link")"; sleep 1
 after="$(js "d['send']" "$(status)")"
 if [ -z "$before" ]; then
-  [ "$(js "d['ok']" "$r")" = False ] && ok "C5 🔑 New link without a phone network → refused: $(js "d['message']" "$r")" || bad "C5 $r"
+  [ "$(js "d['ok']" "$r")" = False ] && ok "C5 🔄 Refresh QR code without a phone network → refused: $(js "d['message']" "$r")" || bad "C5 $r"
 else
-  [ "$(js "d['ok']" "$r")" = True ] && [ -n "$after" ] && [ "$after" != "$before" ] && ok "C5 🔑 New link → a new token, the page's link changed" || bad "C5 $r (link changed: $([ "$after" != "$before" ] && echo yes || echo no))"
+  [ "$(js "d['ok']" "$r")" = True ] && [ -n "$after" ] && [ "$after" != "$before" ] && ok "C5 🔄 Refresh QR code → a new token, the page's link changed" || bad "C5 $r (link changed: $([ "$after" != "$before" ] && echo yes || echo no))"
 fi
 
 # C6 — no other web site

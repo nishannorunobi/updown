@@ -155,7 +155,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	var door *http.Server
 	doorPort, doorQR := 0, ""
 	relink := &phonenet.Relink{Grace: time.Duration(cfg.RelinkGraceSec) * time.Second}
-	fresh := false // 🔑 New link: never reuse
+	fresh := false // 🔄 Refresh QR code: never reuse
 	closeDoor := func() {
 		if door != nil {
 			relink.Remember(doorQR, doorPort, srv.Link().Token, time.Now())

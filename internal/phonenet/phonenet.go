@@ -46,7 +46,7 @@ func (w *Watcher) Reset() { w.seen = false }
 
 // Relink keeps the phone's link through a short dropout ([2.8]): when the door closes, its address, port and
 // token are remembered; the SAME address back within Grace → the same port + token, so the page open on the
-// phone carries on. Grace 0 = always a new link. Forget (🔑 New link) drops what was remembered.
+// phone carries on. Grace 0 = always a new link. Forget (🔄 Refresh QR code) drops what was remembered.
 type Relink struct {
 	Grace time.Duration
 	qr    string
