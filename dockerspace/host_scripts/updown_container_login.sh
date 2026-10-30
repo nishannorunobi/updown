@@ -15,7 +15,7 @@ case "${1:-}" in -h|--help) sed -n '3,/^# ─/{/^# ─/d;s/^# \{0,1\}//;p}' "$0"
 set -uo pipefail
 # ── Mirror logging ─────────────────────────────────────────────────────────────
 _WS_ROOT="$(d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; while [ ! -d "$d/mountspace" ] && [ "$d" != "/" ]; do d="$(dirname "$d")"; done; echo "$d")"
-if [ -f "$_WS_ROOT/init/create_logging_path.sh" ]; then source "$_WS_ROOT/init/create_logging_path.sh"; setup_logging; fi
+if [ -f "$_WS_ROOT/ccc/scripts/lib/create_logging_path.sh" ]; then source "$_WS_ROOT/ccc/scripts/lib/create_logging_path.sh"; setup_logging; fi
 # ──────────────────────────────────────────────────────────────────────────────
 ok()   { echo -e "\033[32m[  OK  ]\033[0m $*"; }
 info() { echo -e "\033[36m[ INFO ]\033[0m $*"; }
