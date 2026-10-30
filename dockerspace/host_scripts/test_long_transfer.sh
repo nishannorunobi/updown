@@ -20,7 +20,7 @@ _WS_ROOT="$(d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; while [ ! -d "$d/
 if [ -f "$_WS_ROOT/ccc/scripts/lib/create_logging_path.sh" ]; then source "$_WS_ROOT/ccc/scripts/lib/create_logging_path.sh"; setup_logging; fi
 
 PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-WS="$(cd "$(git -C "$PROJECT" rev-parse --path-format=absolute --git-common-dir)/../../.." && pwd)"   # the real workspace (also from a test worktree)
+WS="$(cd "$(git -C "$PROJECT" rev-parse --path-format=absolute --git-common-dir)/../../../.." && pwd)"   # the real workspace (also from a test worktree)
 IMG=updown-dev-image:1.0; FAIL=0
 ok()  { echo -e "\033[32m[  OK  ]\033[0m $*"; }
 bad() { echo -e "\033[31m[ERROR]\033[0m  $*"; FAIL=1; }

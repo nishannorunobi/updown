@@ -71,7 +71,7 @@ updown/
 
 Mounts: the project at `/updown`; the Go cache in
 `mountspace/data/myworkspace/projectspace/updown/gocache`; logs in
-`mountspace/logs/myworkspace/projectspace/updown/` (workspace mirror-log convention).
+`mountspace/logs/myworkspace/projectspace/apps/updown/` (workspace mirror-log convention).
 The container runs as the host user, so every file it writes stays owned by you.
 Release tests run each release read-only in clean `ubuntu:24.04`, `debian:12-slim` and
 `fedora:41` containers with `--network none`, as a non-root user — proving an offline install.

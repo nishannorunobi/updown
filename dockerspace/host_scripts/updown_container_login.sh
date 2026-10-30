@@ -7,7 +7,7 @@
 # Steps       1. the container: updown-dev-container (the default)
 #             2. checks it runs (else: how to start it)
 #             3. a short reminder, then the shell — bash if the image has it, else sh
-# How         bash ~/myworkspace/projectspace/updown/dockerspace/host_scripts/updown_container_login.sh
+# How         bash ~/myworkspace/projectspace/apps/updown/dockerspace/host_scripts/updown_container_login.sh
 # Careful     the shared folder and settings are REAL — look, do not change.
 # See also    a single command without a shell: docker exec updown-dev-container <command>
 # ─────────────────────────────────────────────────────────────────────────────

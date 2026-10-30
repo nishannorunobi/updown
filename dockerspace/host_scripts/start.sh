@@ -25,8 +25,8 @@ C=updown-dev-container
 # Bind-mount sources must exist and belong to the host user BEFORE compose runs,
 # otherwise Docker creates them root-owned and the container (running as this user)
 # cannot write its Go cache or logs.
-mkdir -p "$PROJECT/../../mountspace/data/myworkspace/projectspace/updown/gocache" \
-         "$PROJECT/../../mountspace/logs/myworkspace/projectspace/updown" 2>/dev/null || true
+mkdir -p "$PROJECT/../../../mountspace/data/myworkspace/projectspace/updown/gocache" \
+         "$PROJECT/../../../mountspace/logs/myworkspace/projectspace/apps/updown" 2>/dev/null || true
 
 export HOST_UID="$(id -u)" HOST_GID="$(id -g)"
 # This PC's Downloads folder (XDG on Linux, else ~/Downloads) — mounted at /downloads.
@@ -34,6 +34,9 @@ HOST_DOWNLOADS="$(sed -n 's/^XDG_DOWNLOAD_DIR="\(.*\)"/\1/p' "$HOME/.config/user
 export HOST_DOWNLOADS="${HOST_DOWNLOADS:-$HOME/Downloads}"
 mkdir -p "$HOST_DOWNLOADS"
 cd "$DOCKERSPACE" || exit 1
+# this pod sits at its folder of ccc/scripts/gitmgt/repos.conf: its relative mounts reach THIS workspace's mountspace/ — else Docker
+# would quietly make EMPTY data folders elsewhere (CLAUDEWORK-258)
+[ "$(cd "$PWD/../../../../mountspace" 2>/dev/null && pwd)" = "$_WS_ROOT/mountspace" ] || { echo -e "\033[31m[ERROR]\033[0m  ../../../../mountspace from $PWD is not this workspace's mountspace/ — this pod is not at its folder (ccc/scripts/gitmgt/repos.conf): bash ccc/scripts/gitmgt/move_repos_to_new_folders.sh"; exit 1; }
 if [ "${1:-}" = "--build" ]; then
     echo "==> Rebuilding updown-dev-image, then starting…"
     docker compose up -d --build || exit 1
