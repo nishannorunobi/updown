@@ -52,7 +52,7 @@ if link="$(docker exec "$C" python3 /updown/updown-agent/agent.py link 90 2>/dev
     echo "         this link never changes — bookmark it; the QR codes on it follow the phone's network"
     exit 0
 fi
-if docker ps --format '{{.Names}}' | grep -qx "$C"; then
+if docker ps --filter status=running --format '{{.Names}}' | grep -qx "$C"; then
     echo -e "\033[33m[WARN]\033[0m   $C running, but updown gave no link yet — see: docker logs $C"; exit 0
 fi
 echo -e "\033[31m[ERROR]\033[0m  $C did not come up (docker logs $C)"
