@@ -30,7 +30,8 @@ CONF = os.environ.get("UPDOWN_AGENT_CONF", os.path.join(HERE, "updown.conf"))
 STATE = os.environ.get("UPDOWN_AGENT_STATE", "/tmp/updown-agent")      # inside the container only
 LINK_FILE = os.path.join(STATE, "link")
 BINARY = os.path.join(STATE, "updown")
-LOG_DIR = os.path.join(os.environ.get("LOG_MIRROR_ROOT", "/tmp"), "updown-agent")
+# the mirror log only when a mirror folder is given (LOGAN-12) — not set → the console only (Docker keeps it, Alloy streams it)
+LOG_DIR = os.path.join(os.environ["LOG_MIRROR_ROOT"], "updown-agent") if os.environ.get("LOG_MIRROR_ROOT") else ""
 LINK_RE = re.compile(r"open this page on this PC to show the QR codes: (\S+)")
 ACTIONS_CONF = os.environ.get("UPDOWN_AGENT_ACTIONS", os.path.join(HERE, "actions.conf"))
 ACTIONS_DIR = os.path.join(os.path.dirname(ACTIONS_CONF), "actions")
@@ -45,10 +46,12 @@ _log_lock = threading.Lock()
 
 
 def say(msg):
-    """One line to the console (docker logs) and to the mirror log."""
+    """One line to the console (docker logs) and, when LOG_DIR is set, to the mirror log."""
     line = f"[updown-agent] {msg}"
     with _log_lock:
         print(line, flush=True)
+        if not LOG_DIR:
+            return
         try:
             os.makedirs(LOG_DIR, exist_ok=True)
             with open(os.path.join(LOG_DIR, "agent_py.log"), "a") as f:
