@@ -33,6 +33,9 @@ services:
       - ${HOST_DOWNLOADS:-${HOME}/Downloads}:/downloads                  # this PC's Downloads: uploads land here, the Receive screen lists it
     environment:
       LOG_MIRROR_ROOT: /mountspace/logs/myworkspace/projectspace/apps/updown
+      LOG_URL: ${LOG_URL:-}            # the log server (dockerspace/.env) — empty → no shipping (LOGAN-29)
+      LOG_PROJECT: updown              # Loki labels of every line this container ships
+      LOG_CONTAINER: updown-dev-container
       CONTAINER_WORKDIR: /updown
       TZ: ${TZ:-America/New_York}
     restart: "no"

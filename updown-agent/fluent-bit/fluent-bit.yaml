@@ -1,0 +1,47 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# fluent-bit.yaml — updown's log shipper: every mirror file of this container → Loki (LOGAN-29)
+#
+# What for    The container keeps its logs in its own volume ($LOG_MIRROR_ROOT); this sends every
+#             line to the log server at LOG_URL — wherever it runs. Nothing on this PC is read.
+#
+# Who         updown-agent/agent.py keeps it running beside updown when LOG_URL is set (none → not started).
+#
+# Settings    from the agent's environment: LOG_MIRROR_ROOT · LOKI_HOST / LOKI_PORT / LOKI_TLS (from
+#             LOG_URL) · LOG_PROJECT · LOG_CONTAINER (compose)
+#
+# Files       /mountspace/logs/.fluent-bit/  tail.db (how far each file was read) · buffer/ (lines Loki has
+#             not taken yet — kept on disk, max 50 MB) — in the log volume, outside the tailed tree
+#
+# Labels      project · container · path (the file inside the container)
+# ─────────────────────────────────────────────────────────────────────────────
+service:
+  flush: 2
+  log_level: info
+  storage.path: /mountspace/logs/.fluent-bit/buffer
+  storage.sync: normal
+
+pipeline:
+  inputs:
+    - name: tail
+      # every depth spelled out: tail's glob has no recursive ** (the deepest file today is 4 folders down)
+      path: ${LOG_MIRROR_ROOT}/*.log, ${LOG_MIRROR_ROOT}/*/*.log, ${LOG_MIRROR_ROOT}/*/*/*.log, ${LOG_MIRROR_ROOT}/*/*/*/*.log, ${LOG_MIRROR_ROOT}/*/*/*/*/*.log, ${LOG_MIRROR_ROOT}/*/*/*/*/*/*.log
+      path_key: path
+      db: /mountspace/logs/.fluent-bit/tail.db
+      read_from_head: true          # a file written before Fluent Bit started is sent from its first line
+      refresh_interval: 5           # new files found within 5 s
+      rotate_wait: 30               # a file renamed to .1 is read to its end first
+      storage.type: filesystem
+
+  outputs:
+    - name: loki
+      match: '*'
+      host: ${LOKI_HOST}
+      port: ${LOKI_PORT}
+      tls: ${LOKI_TLS}
+      labels: project=${LOG_PROJECT}, container=${LOG_CONTAINER}
+      label_keys: $path
+      remove_keys: path
+      line_format: key_value
+      drop_single_key: raw          # the line as written, not log="…"
+      retry_limit: no_limits        # Loki down → keep trying (the default gives up after 1 retry and drops the lines)
+      storage.total_limit_size: 50M # … but never more than 50 MB waiting on disk (the oldest go first)

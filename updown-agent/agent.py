@@ -11,6 +11,7 @@
 #                docker stop → passed on to updown → clean exit
 #             The phone's network is followed by updown ITSELF ([2.6], UPDOWN-52): its page stays at
 #             http://localhost:8070 and it opens / moves / closes the phone's door as the network changes.
+#             4b. (LOG_URL set) Fluent Bit beside it: the mirror files → Loki (fluent-bit/fluent-bit.yaml, LOGAN-29)
 #             5. the page's BUTTONS ([2.7]): a small API on CONTROLS_URL (updown.conf, http://localhost:8069) —
 #                actions.conf lists the buttons, each runs its own file in actions/ (check_now.py, …).
 #                A new button = a line in actions.conf + a file in actions/. This PC only, this page only.
@@ -36,6 +37,8 @@ LOG_DIR = os.path.join(os.environ["LOG_MIRROR_ROOT"], "updown-agent") if os.envi
 # updown's own output in a mirror file too (LOGAN-14) — the container's collector sees the service, not only the agent
 SERVICE_LOG = os.path.join(os.environ["LOG_MIRROR_ROOT"], "service", "updown.log") if os.environ.get("LOG_MIRROR_ROOT") else ""
 LOG_MAX = 10 * 1024 * 1024                                              # a mirror file > 10 MB → .1, the old .1 replaced
+FLUENT_BIT_CONF = os.path.join(HERE, "fluent-bit", "fluent-bit.yaml")
+FLUENT_BIT_STATE = "/mountspace/logs/.fluent-bit"                      # its read positions + buffer, in the log volume (LOGAN-29)
 LINK_RE = re.compile(r"open this page on this PC to show the QR codes: (\S+)")
 ACTIONS_CONF = os.environ.get("UPDOWN_AGENT_ACTIONS", os.path.join(HERE, "actions.conf"))
 ACTIONS_DIR = os.path.join(os.path.dirname(ACTIONS_CONF), "actions")
@@ -290,6 +293,7 @@ def serve_controls(agent):
 class Agent:
     def __init__(self):
         self.child = None
+        self.fb = None                          # Fluent Bit (LOGAN-29)
         self.stopping = False
         self.restarting = ""
 
@@ -322,11 +326,41 @@ class Agent:
                 say("link — open it in this PC's browser for the QR codes: " + m.group(1))
         return self.child.wait()
 
+    def keep_fluent_bit(self):
+        """Thread (LOGAN-29): Fluent Bit ships the container's mirror files to Loki at LOG_URL, kept running beside
+        updown (exits → WARN, again in 5 s) — it never stops updown. No LOG_URL → not started."""
+        url, root = os.environ.get("LOG_URL", ""), os.environ.get("LOG_MIRROR_ROOT", "")
+        if not (url and root):
+            say("log shipping off — no LOG_URL" if not url else "log shipping off — no LOG_MIRROR_ROOT")
+            return
+        u = urllib.parse.urlparse(url)
+        tls = u.scheme == "https"
+        fb_env = {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"), "LOG_MIRROR_ROOT": root,
+                  "LOKI_HOST": u.hostname or "", "LOKI_PORT": str(u.port or (443 if tls else 3100)),
+                  "LOKI_TLS": "on" if tls else "off", "LOG_PROJECT": os.environ.get("LOG_PROJECT", "updown"),
+                  "LOG_CONTAINER": os.environ.get("LOG_CONTAINER", os.environ.get("HOSTNAME", ""))}
+        restarts = 0
+        while not self.stopping:
+            try:
+                os.makedirs(FLUENT_BIT_STATE, exist_ok=True)
+                self.fb = subprocess.Popen(["fluent-bit", "-c", FLUENT_BIT_CONF], env=fb_env, stdin=subprocess.DEVNULL)
+            except OSError as e:
+                say(f"WARN: Fluent Bit not started ({e}) — the files stay in the volume")
+                return
+            say(f"Fluent Bit started → {u.scheme}://{u.hostname}:{fb_env['LOKI_PORT']} (pid {self.fb.pid})")
+            rc = self.fb.wait()
+            if self.stopping:
+                return
+            restarts += 1
+            say(f"WARN: Fluent Bit exited ({rc}) — starting it again in 5 s (restart {restarts})")
+            time.sleep(5)
+
     def main(self):
         signal.signal(signal.SIGTERM, self.stop)
         signal.signal(signal.SIGINT, self.stop)
         say(f"starting — settings: {CONF}")
         serve_controls(self)
+        threading.Thread(target=self.keep_fluent_bit, name="fluent-bit", daemon=True).start()
         delay = 1
         while not self.stopping:
             if not build():
@@ -346,6 +380,12 @@ class Agent:
                 say(f"updown ended with exit {rc} — starting it again in {delay}s")
                 time.sleep(delay)
                 delay = 1 if time.time() - started > 60 else min(delay * 2, 60)  # a long good run resets the backoff
+        if self.fb and self.fb.poll() is None:     # last: it ships the final lines, then flushes and exits
+            self.fb.terminate()
+            try:
+                self.fb.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.fb.kill()
         say("stopped")
         return 0
 

@@ -23,5 +23,15 @@ ENV GOTOOLCHAIN=local \
     HOME=/tmp \
     TZ=UTC
 
+# Fluent Bit v5 from its official, signed Debian repository — pinned (LOGAN-29); the agent starts it
+ARG FLUENT_BIT_VERSION=5.1.4
+RUN apt-get update -qq && apt-get install -y --no-install-recommends curl gnupg ca-certificates \
+ && curl -fsSL https://packages.fluentbit.io/fluentbit.key | gpg --dearmor -o /usr/share/keyrings/fluentbit.gpg \
+ && . /etc/os-release \
+ && echo "deb [signed-by=/usr/share/keyrings/fluentbit.gpg] https://packages.fluentbit.io/debian/${VERSION_CODENAME} ${VERSION_CODENAME} main" \
+      > /etc/apt/sources.list.d/fluentbit.list \
+ && apt-get update -qq && apt-get install -y --no-install-recommends fluent-bit=${FLUENT_BIT_VERSION} \
+ && ln -sf /opt/fluent-bit/bin/fluent-bit /usr/local/bin/fluent-bit && rm -rf /var/lib/apt/lists/*
+
 # A dev container stays up; work runs in it through host_scripts/exec.sh / shell.sh.
 CMD ["sleep", "infinity"]
