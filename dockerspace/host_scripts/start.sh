@@ -37,6 +37,10 @@ cd "$DOCKERSPACE" || exit 1
 # this pod sits at its folder of ccc/scripts/gitmgt/repos.conf: its relative mounts reach THIS workspace's mountspace/ — else Docker
 # would quietly make EMPTY data folders elsewhere (CLAUDEWORK-258)
 [ "$(cd "$PWD/../../../../mountspace" 2>/dev/null && pwd)" = "$_WS_ROOT/mountspace" ] || { echo -e "\033[31m[ERROR]\033[0m  ../../../../mountspace from $PWD is not this workspace's mountspace/ — this pod is not at its folder (ccc/scripts/gitmgt/repos.conf): bash ccc/scripts/gitmgt/move_repos_to_new_folders.sh"; exit 1; }
+# the mirror-log volume (LOGAN-13) is created root-owned — hand it to the user the container runs as (once per start, idempotent;
+# compose creates the volume with its labels and builds the image when missing)
+docker compose run --rm --no-deps --user 0 --entrypoint chown updown-dev "$HOST_UID:$HOST_GID" /mountspace/logs >/dev/null 2>&1 \
+    || { echo -e "\033[31m[ERROR]\033[0m  the log volume (/mountspace/logs) could not be handed to $HOST_UID:$HOST_GID — docker compose run updown-dev"; exit 1; }
 if [ "${1:-}" = "--build" ]; then
     echo "==> Rebuilding updown-dev-image, then starting…"
     docker compose up -d --build || exit 1

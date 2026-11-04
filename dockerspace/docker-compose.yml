@@ -28,7 +28,7 @@ services:
     command: ["python3", "/updown/updown-agent/agent.py"]
     volumes:
       - ..:/updown                                                      # the project (source + release/)
-      - ../../../../mountspace/logs:/mountspace/logs                       # mirror logs
+      - updown-logs:/mountspace/logs                                       # mirror logs stay INSIDE (LOGAN-13): a named volume, no host path
       - ../../../../mountspace/data/myworkspace/projectspace/updown/gocache:/gocache   # Go build + module cache
       - ${HOST_DOWNLOADS:-${HOME}/Downloads}:/downloads                  # this PC's Downloads: uploads land here, the Receive screen lists it
     environment:
@@ -36,3 +36,6 @@ services:
       CONTAINER_WORKDIR: /updown
       TZ: ${TZ:-America/New_York}
     restart: "no"
+
+volumes:
+  updown-logs:                    # the mirror logs (LOGAN-13)
