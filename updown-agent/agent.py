@@ -18,6 +18,7 @@
 #             python3 /updown/updown-agent/agent.py link [SECONDS]   → prints the current link (waits up to
 #                                                                     SECONDS, default 60), exit 1 if none
 # Output      [updown-agent] lines + updown's own [updown] lines, in docker logs and the mirror log
+#             ($LOG_MIRROR_ROOT/updown-agent/agent_py.log · service/updown.log — 10 MB → .1, LOGAN-14)
 # Note        Python standard library only (the dev image has python3, nothing else). The phone token is
 #             never printed: the link is the HOST page (this PC's browser), protected by its own key.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -32,6 +33,9 @@ LINK_FILE = os.path.join(STATE, "link")
 BINARY = os.path.join(STATE, "updown")
 # the mirror log only when a mirror folder is given (LOGAN-12) — not set → the console only (Docker keeps it, Alloy streams it)
 LOG_DIR = os.path.join(os.environ["LOG_MIRROR_ROOT"], "updown-agent") if os.environ.get("LOG_MIRROR_ROOT") else ""
+# updown's own output in a mirror file too (LOGAN-14) — the container's collector sees the service, not only the agent
+SERVICE_LOG = os.path.join(os.environ["LOG_MIRROR_ROOT"], "service", "updown.log") if os.environ.get("LOG_MIRROR_ROOT") else ""
+LOG_MAX = 10 * 1024 * 1024                                              # a mirror file > 10 MB → .1, the old .1 replaced
 LINK_RE = re.compile(r"open this page on this PC to show the QR codes: (\S+)")
 ACTIONS_CONF = os.environ.get("UPDOWN_AGENT_ACTIONS", os.path.join(HERE, "actions.conf"))
 ACTIONS_DIR = os.path.join(os.path.dirname(ACTIONS_CONF), "actions")
@@ -50,14 +54,20 @@ def say(msg):
     line = f"[updown-agent] {msg}"
     with _log_lock:
         print(line, flush=True)
-        if not LOG_DIR:
-            return
-        try:
-            os.makedirs(LOG_DIR, exist_ok=True)
-            with open(os.path.join(LOG_DIR, "agent_py.log"), "a") as f:
-                f.write(time.strftime("[%Y-%m-%d %H:%M:%S] ") + line + "\n")
-        except OSError:
-            pass
+        if LOG_DIR:
+            mirror_append(os.path.join(LOG_DIR, "agent_py.log"), time.strftime("[%Y-%m-%d %H:%M:%S] ") + line)
+
+
+def mirror_append(path, line):
+    """One line into a mirror file (rotated at LOG_MAX). Never raises: logging must not stop updown."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if os.path.exists(path) and os.path.getsize(path) > LOG_MAX:
+            os.replace(path, path + ".1")
+        with open(path, "a") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
 
 
 def set_link(url):
@@ -304,6 +314,8 @@ class Agent:
         for line in self.child.stdout:
             line = line.rstrip("\n")
             print(line, flush=True)                                  # updown's own [updown] lines
+            if SERVICE_LOG:
+                mirror_append(SERVICE_LOG, line)
             m = LINK_RE.search(line)
             if m:
                 set_link(m.group(1))
