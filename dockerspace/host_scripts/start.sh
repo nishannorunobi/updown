@@ -1,63 +1,15 @@
 #!/bin/bash
-# start.sh — start updown's container (docker compose) from its EXISTING image. Inside, updown-agent (the
-# entry point, [2.1] UPDOWN-26) builds and runs updown; this script only starts the container and shows
-# the link the agent hands out — open it in this PC's browser for the QR codes.
+# ─────────────────────────────────────────────────────────────────────────────
+# start.sh — start updown's container (docker compose) from its EXISTING image and show its link
 #
-#     bash dockerspace/host_scripts/start.sh            # daily path: no rebuild
-#     bash dockerspace/host_scripts/start.sh --build    # rebuild the image first (Dockerfile / GO_IMAGE changed)
-#
-# Idempotent: docker compose up (a changed setting recreates the container; otherwise nothing changes).
-# Exit 1 = the container did not come up.
-set -uo pipefail
-
-# ── Mirror logging ─────────────────────────────────────────────────────────────
-_WS_ROOT="$(d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; while [ ! -d "$d/mountspace" ] && [ "$d" != "/" ]; do d="$(dirname "$d")"; done; echo "$d")"
-if [ -f "$_WS_ROOT/ccc/scripts/lib/create_logging_path.sh" ]; then
-    source "$_WS_ROOT/ccc/scripts/lib/create_logging_path.sh"
-    setup_logging
-fi
-# ──────────────────────────────────────────────────────────────────────────────
-
-DOCKERSPACE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROJECT="$(dirname "$DOCKERSPACE")"
-C=updown-dev-container
-
-# Bind-mount sources must exist and belong to the host user BEFORE compose runs,
-# otherwise Docker creates them root-owned and the container (running as this user)
-# cannot write its Go cache or logs.
-mkdir -p "$PROJECT/../../../mountspace/data/myworkspace/projectspace/updown/gocache" \
-         "$PROJECT/../../../mountspace/logs/myworkspace/projectspace/apps/updown" 2>/dev/null || true
-
-export HOST_UID="$(id -u)" HOST_GID="$(id -g)"
-# This PC's Downloads folder (XDG on Linux, else ~/Downloads) — mounted at /downloads.
-HOST_DOWNLOADS="$(sed -n 's/^XDG_DOWNLOAD_DIR="\(.*\)"/\1/p' "$HOME/.config/user-dirs.dirs" 2>/dev/null | sed "s|\$HOME|$HOME|")"
-export HOST_DOWNLOADS="${HOST_DOWNLOADS:-$HOME/Downloads}"
-mkdir -p "$HOST_DOWNLOADS"
-cd "$DOCKERSPACE" || exit 1
-# this pod sits at its folder of ccc/scripts/gitmgt/repos.conf: its relative mounts reach THIS workspace's mountspace/ — else Docker
-# would quietly make EMPTY data folders elsewhere (CLAUDEWORK-258)
-[ "$(cd "$PWD/../../../../mountspace" 2>/dev/null && pwd)" = "$_WS_ROOT/mountspace" ] || { echo -e "\033[31m[ERROR]\033[0m  ../../../../mountspace from $PWD is not this workspace's mountspace/ — this pod is not at its folder (ccc/scripts/gitmgt/repos.conf): bash ccc/scripts/gitmgt/move_repos_to_new_folders.sh"; exit 1; }
-# the mirror-log volume (LOGAN-13) is created root-owned — hand it to the user the container runs as (once per start, idempotent;
-# compose creates the volume with its labels and builds the image when missing)
-docker compose run --rm --no-deps --user 0 --entrypoint chown updown-dev "$HOST_UID:$HOST_GID" /mountspace/logs >/dev/null 2>&1 \
-    || { echo -e "\033[31m[ERROR]\033[0m  the log volume (/mountspace/logs) could not be handed to $HOST_UID:$HOST_GID — docker compose run updown-dev"; exit 1; }
-if [ "${1:-}" = "--build" ]; then
-    echo "==> Rebuilding updown-dev-image, then starting…"
-    docker compose up -d --build || exit 1
-else
-    docker compose up -d || exit 1
-fi
-
-# the link — asked from updown-agent inside (it builds updown first: up to ~1 minute on a cold Go cache)
-if link="$(docker exec "$C" python3 /updown/updown-agent/agent.py link 90 2>/dev/null)"; then
-    echo -e "\033[32m[  OK  ]\033[0m $C running — updown is ready"
-    echo "         open this link in this PC's browser for the QR codes (send / receive files):"
-    echo -e "         \033[1m$link\033[0m"
-    echo "         this link never changes — bookmark it; the QR codes on it follow the phone's network"
-    exit 0
-fi
-if docker ps --filter status=running --format '{{.Names}}' | grep -qx "$C"; then
-    echo -e "\033[33m[WARN]\033[0m   $C running, but updown gave no link yet — see: docker logs $C"; exit 0
-fi
-echo -e "\033[31m[ERROR]\033[0m  $C did not come up (docker logs $C)"
-exit 1
+# What for    Inside, updown-agent (the entry point, [2.1] UPDOWN-26) builds and runs updown; this only starts the
+#             container and shows the link the agent hands out — open it in this PC's browser for the QR codes.
+# How         bash dockerspace/host_scripts/start.sh            daily path: no rebuild
+#             bash dockerspace/host_scripts/start.sh --build    rebuild the image first (Dockerfile / GO_IMAGE changed)
+# Steps       1. bind-mount folders made, owned by you   2. this PC's Downloads → /downloads
+#             3. the pod guard (CLAUDEWORK-258)   4. the log volume handed to you   5. docker compose up -d
+#             6. the link (≤ 90 s)
+# Errors      exit 1 = the container did not come up · the pod is not at its folder · the log volume
+# Idempotent  docker compose up: a changed setting recreates the container; otherwise nothing changes
+# ─────────────────────────────────────────────────────────────────────────────
+STARTER="$0" exec python3 -u "$(dirname "$0")/start.py" "$@"

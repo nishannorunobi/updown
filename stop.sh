@@ -1,15 +1,10 @@
 #!/bin/bash
-# stop.sh — stop updown's dev container (idempotent). The real work is in
-# dockerspace/host_scripts/stop.sh.
-set -uo pipefail
-
-# ── Mirror logging ─────────────────────────────────────────────────────────────
-_WS_ROOT="$(d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; while [ ! -d "$d/mountspace" ] && [ "$d" != "/" ]; do d="$(dirname "$d")"; done; echo "$d")"
-if [ -f "$_WS_ROOT/ccc/scripts/lib/create_logging_path.sh" ]; then
-    source "$_WS_ROOT/ccc/scripts/lib/create_logging_path.sh"
-    setup_logging
-fi
-# ──────────────────────────────────────────────────────────────────────────────
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec bash "$SCRIPT_DIR/dockerspace/host_scripts/stop.sh" "$@"
+# ─────────────────────────────────────────────────────────────────────────────
+# stop.sh — stop updown's dev container (idempotent; container + image kept)
+#
+# What for    This project's own entry point; the work is dockerspace/host_scripts/stop.py.
+# How         bash stop.sh
+# Output      [  OK  ] updown-dev-container stopped   ·   … already stopped
+# Errors      exit 1 = docker could not stop it
+# ─────────────────────────────────────────────────────────────────────────────
+STARTER="$0" exec python3 -u "$(dirname "$0")/dockerspace/host_scripts/stop.py" "$@"
