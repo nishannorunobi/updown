@@ -1,9 +1,9 @@
 # updown
 
 ```
-bash start.sh      # starts updown — then open http://localhost:8070 on this PC (always the same), scan a QR code with the phone
-bash status.sh     # running? + the current link
-bash stop.sh
+bash dockerspace/host_scripts/start.sh      # starts updown — then open http://localhost:8070 on this PC (always the same), scan a QR code with the phone
+bash dockerspace/host_scripts/status.sh     # running? + the current link
+bash dockerspace/host_scripts/stop.sh
 ```
 
 Offline file transfer between a PC and a phone: the PC runs a small server, the phone
@@ -22,9 +22,9 @@ Nothing is installed on the host PC: the Go toolchain, builds and tests run in t
 `CGO_ENABLED=0`).
 
 ```
-bash start.sh [--build]        # start the dev container (idempotent; --build rebuilds the image)
-bash stop.sh                   # stop it (idempotent)
-bash status.sh [--state]       # running / stopped
+bash dockerspace/host_scripts/start.sh [--build]        # start the dev container (idempotent; --build rebuilds the image)
+bash dockerspace/host_scripts/stop.sh                   # stop it (idempotent)
+bash dockerspace/host_scripts/status.sh [--state]       # running / stopped
 
 bash dockerspace/host_scripts/exec.sh <cmd>     # run a command inside, in /updown
 bash dockerspace/host_scripts/shell.sh          # interactive shell inside
@@ -54,7 +54,6 @@ updown/
 │                                    windows/start.cmd, updown.conf (defaults)
 ├── docs/contract.md                 what every build must do
 ├── tools/mkzip/                     build-time zip tool (standard library only)
-├── start.sh, stop.sh, status.sh     start / stop the container; start + status show the link (workspace: svcmgt)
 ├── updown-agent/                    the container's ENTRY POINT: builds + runs updown, hands out the link
 │   ├── agent.py                     (python3, standard library) · `agent.py link` = the current link
 │   ├── updown.conf                  the service's settings (STOP_MODE=idle, 15 min, Downloads, CONTROLS_URL …)

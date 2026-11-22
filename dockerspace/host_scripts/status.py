@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""status.py — is updown running, and its link? The door: ../../status.sh. --state → one word (running / stopped)."""
+"""status.py — is updown running, and its link? The door: status.sh beside it. --state → one word (running / stopped)."""
 import os
 import sys
 

@@ -36,6 +36,7 @@ DOORS = ["start.sh", "stop.sh", "status.sh", *(f"{H}/{d}.sh" for d in (
     "start", "stop", "clean", "exec", "shell", "build", "pull_images", "test_release", "updown_container_login",
     "test_agent", "test_controls", "test_long_transfer")), "dockerspace/container_scripts/build.sh",
     "dockerspace/container_scripts/env_check.sh"]
+MOVED = {d: f"{H}/{d}" for d in ("start.sh", "stop.sh", "status.sh")}   # M15.8 (CLAUDEWORK-639): the doors beside their .py
 C = "updown-dev-container"
 FAILED = []
 
@@ -114,7 +115,7 @@ def make_ws(ws, source):
     return pod
 
 
-def run(pod, door, args=(), env=None, session=False, cwd=None):
+def run(pod, door, args=(), env=None, session=False, cwd=None, side="new"):
     ws = pod.parents[2]
     log, state = ws / "fake_docker.log", ws / "fake_state"
     log.write_text("")
@@ -122,6 +123,7 @@ def run(pod, door, args=(), env=None, session=False, cwd=None):
     e = {**os.environ, "PATH": f"{BIN}:{os.environ['PATH']}", "FAKE_LOG": str(log), "FAKE_STATE": str(state),
          "HOME": str(home), **(env or {})}
     e.pop("LOG_FILE", None)
+    door = door if side == "old" else MOVED.get(door, door)
     r = subprocess.run(["bash", str(pod / door), *args], cwd=cwd or pod, env=e, text=True, stdout=subprocess.PIPE,
                        stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=session, timeout=60)
     return r.stdout.replace(str(ws), "<WS>"), r.returncode, log.read_text().replace(str(ws), "<WS>")
@@ -136,7 +138,7 @@ def same(name, door, args=(), env=None, state=None, expect=None, prepare=None, s
         (ws / "home").mkdir()
         if prepare:
             prepare(ws)
-        res[side] = run(pod, door, args, env, session=session)
+        res[side] = run(pod, door, args, env, session=session, side=side)
     new = res["new"]
     good = expect(*new) if expect else True
     if "old" in res:
@@ -153,7 +155,7 @@ try:
 
     # H0 — the doors, with the fake docker first on PATH: a --help that is not caught would show docker calls
     bad = []
-    for d in DOORS:
+    for d in dict.fromkeys(MOVED.get(d, d) for d in DOORS):
         if starter and starter.complex_logic(PROJECT / d):
             bad.append(f"{d}: {starter.complex_logic(PROJECT / d)}")
         log = TMP / "help.log"

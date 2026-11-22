@@ -1,10 +1,8 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
-# stop.sh — stop updown's dev container (idempotent; container + image kept)
+# status.sh — is updown running, and what is its current link?
 #
-# What for    This project's own entry point; the work is dockerspace/host_scripts/stop.py.
-# How         bash stop.sh
-# Output      [  OK  ] updown-dev-container stopped   ·   … already stopped
-# Errors      exit 1 = docker could not stop it
+# How         bash dockerspace/host_scripts/status.sh            human: running / stopped + the link (asked from updown-agent)
+#             bash dockerspace/host_scripts/status.sh --state    one word: running / stopped   (svcmgt)
 # ─────────────────────────────────────────────────────────────────────────────
-STARTER="$0" exec python3 -u "$(dirname "$0")/dockerspace/host_scripts/stop.py" "$@"
+STARTER="$0" exec python3 -u "$(dirname "$0")/status.py" "$@"

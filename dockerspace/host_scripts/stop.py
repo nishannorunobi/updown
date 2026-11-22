@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """stop.py — stop updown's dev container by its EXPLICIT name (never compose-wide). Container + image kept.
-The doors: ../../stop.sh and stop.sh here. Not running → says so, exit 0."""
+The door: stop.sh beside it. Not running → says so, exit 0."""
 import os
 import subprocess
 import sys

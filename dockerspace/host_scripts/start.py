@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """start.py — start updown's container (docker compose) from its EXISTING image and show the link updown-agent hands
-out. The doors: ../../start.sh and start.sh here (--build = rebuild the image first).
+out. The door: start.sh beside it (--build = rebuild the image first).
 
 Steps
   1. the bind-mount folders exist and belong to you (else Docker makes them root-owned)
